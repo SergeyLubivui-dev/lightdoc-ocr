@@ -1,6 +1,39 @@
-# lightdoc-ocr
+<p align="center">
+  <img src="docs/banner.png" alt="lightdoc-ocr: lightweight offline OCR for Russian documents" width="100%">
+</p>
 
-**RU** · [English below](#english)
+<h1 align="center">lightdoc-ocr</h1>
+
+<p align="center">
+  Лёгкое офлайн-распознавание российских документов: ВУ, реквизиты с проверкой контрольных сумм, JSON. Только CPU.<br>
+  Lightweight offline OCR for Russian documents: driver licence, requisites with checksum validation, JSON. CPU only.
+</p>
+
+<p align="center">
+  <a href="https://github.com/SergeyLubivui-dev/lightdoc-ocr/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/SergeyLubivui-dev/lightdoc-ocr?style=flat-square&color=0e7490"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/SergeyLubivui-dev/lightdoc-ocr?style=flat-square&color=0e7490"></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-0e7490?style=flat-square">
+  <img alt="CPU only" src="https://img.shields.io/badge/CPU-only-0e7490?style=flat-square">
+  <img alt="Offline" src="https://img.shields.io/badge/offline-100%25-0e7490?style=flat-square">
+  <a href="https://github.com/SergeyLubivui-dev/lightdoc-ocr/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/SergeyLubivui-dev/lightdoc-ocr?style=flat-square&color=0e7490"></a>
+  <img alt="Repo size" src="https://img.shields.io/github/repo-size/SergeyLubivui-dev/lightdoc-ocr?style=flat-square&color=0e7490">
+</p>
+
+<p align="center">
+  <b>⭐ Поставьте звезду и подпишитесь (Watch) — так проект развивается быстрее</b><br>
+  <b>⭐ Star and Watch the repo to follow updates</b><br>
+  <a href="https://github.com/SergeyLubivui-dev/lightdoc-ocr">Star / Watch</a> · <a href="https://github.com/SergeyLubivui-dev">Follow @SergeyLubivui-dev</a>
+</p>
+
+<p align="center">
+  <a href="#русский">Русский</a> · <a href="#english">English</a> · <a href="#установка">Quick start</a> · <a href="#формат-результата">JSON output</a>
+</p>
+
+<p align="center"><sub>Topics / Теги: [`ocr`](https://github.com/topics/ocr) [`tesseract`](https://github.com/topics/tesseract) [`opencv`](https://github.com/topics/opencv) [`python`](https://github.com/topics/python) [`russian`](https://github.com/topics/russian) [`document-recognition`](https://github.com/topics/document-recognition) [`driver-license`](https://github.com/topics/driver-license) [`offline`](https://github.com/topics/offline) [`cpu`](https://github.com/topics/cpu) [`rapidocr`](https://github.com/topics/rapidocr)</sub></p>
+
+---
+
+## Русский
 
 Лёгкая офлайн-система распознавания российских документов. Только CPU, без облака: картинки и текст никуда не отправляются.
 

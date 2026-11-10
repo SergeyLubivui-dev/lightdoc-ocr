@@ -1,0 +1,19 @@
+{
+ "pages": [
+  {
+   "page_number": 4,
+   "kind": "empty",
+   "stamps": 0
+  },
+  {
+   "page_number": 5,
+   "kind": "registration",
+   "stamps": 2,
+   "stamp_types": [
+    "ЗАРЕГИСТРИРОВАН",
+    "СНЯТ С РЕГИСТРАЦИОННОГО УЧЕТА"
+   ]
+  }
+ ],
+ "perforated": "45 07 654321"
+}

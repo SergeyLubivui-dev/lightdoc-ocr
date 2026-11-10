@@ -4,7 +4,7 @@ from .sysutil import peak_rss_mb
 from pathlib import Path
 import cv2
 import numpy as np
-from .geometry import find_card_quad, warp_card, order_corners
+from .geometry import find_card_quad, warp_card, order_corners, small_card_crop
 from .doctypes import REGISTRY
 from .doctypes import free_text
 from . import postproc
@@ -80,17 +80,39 @@ class DocumentPipeline:
         _, f = self._face.detect(img)
         return None if f is None else f[np.argmax(f[:, -1])]
 
-    def _classify(self, lines):
+    def _classify(self, lines, card=None):
         scores = {n: t.classify(lines) for n, t in REGISTRY.items()}
         best = max(scores, key=scores.get)
+        if card is not None and scores[best] < 0.6 and "driver_license_back" in REGISTRY:     # структурный признак: сетка таблицы категорий
+            gs = REGISTRY["driver_license_back"].grid_score(card)
+            if gs > scores["driver_license_back"] and gs >= 0.7 and scores.get("driver_license_rf", 0) < 0.6:
+                scores["driver_license_back"] = gs; best = max(scores, key=scores.get)
         return best, scores
 
     def process(self, path, out_dir) -> dict:
         t0 = time.perf_counter()
         out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-        img = imread(path)
+        img = imread(path); meta = None
+        if self.mode in ("auto", "card"):
+            try:
+                sc = small_card_crop(img)
+            except Exception:
+                sc = None
+            if sc is not None: img, meta = sc
+        self._quad_hint = np.float32(meta["quad"]) if meta else None
+        try: r = self._process_inner(path, out, img, t0)
+        finally: self._quad_hint = None
+        if meta: meta = {k: v for k, v in meta.items() if k != "quad"}
+        if meta and isinstance(r, dict):
+            r["small_card"] = meta; r.setdefault("warnings", []).append("small_card: карточка занимает %.1f%% листа — вырезана и увеличена ×%s" % (100 * meta["area_ratio"], meta["scale"]))
+            if r.get("files", {}).get("json"):
+                with open(r["files"]["json"], "w", encoding="utf-8") as f: json.dump(r, f, ensure_ascii=False, indent=2, default=str)
+        return r
+
+    def _process_inner(self, path, out, img, t0) -> dict:
         if self.mode == "page":
             return self._process_page(img, path, out, t0, reason="mode=page")
+        parts = None
         if self.mode in ("auto", "passport"):    # несколько разворотов на одном листе (скан/копия) — делим и читаем каждый
             try:
                 from .spreads import split_spreads
@@ -103,11 +125,16 @@ class DocumentPipeline:
         if self.mode == "passport":
             r = self._process_passport(img, path, out, t0)
             if r is not None: return r
+            r = self._process_spread_pages(img, path, out, t0, parts)
+            if r is not None: return r
         res = self._process_card(img, path, out, t0, allow_page=(self.mode == "auto"))
         # разворот паспорта читается по всему кадру (рамка карточки у него ненадёжна): пробуем, если тип не опознан/слабый/страница с признаками паспорта
         if self.mode == "auto" and (res["doc_type"] in ("passport_rf", "unknown") or res["confidence"] < 0.5 or
                                     (res["doc_type"] == "free_text" and self._passport_cues(res.get("text", "")) >= 2)):
             r = self._process_passport(img, path, out, t0)
+            if r is not None: return r
+        if self.mode == "auto" and res["doc_type"] in ("free_text", "unknown"):      # страницы паспорта без основного разворота (пустая / регистрация / др.)
+            r = self._process_spread_pages(img, path, out, t0, parts)
             if r is not None: return r
         if res["doc_type"] == "free_text":
             return res
@@ -124,7 +151,7 @@ class DocumentPipeline:
 
     @staticmethod
     def _passport_cues(text: str) -> int:
-        t = text.upper(); pats = [r"УФМС", r"\bМВД\b", r"ПАСПОРТ\s*ВЫДАН", r"КОД\s*ПОДРАЗДЕЛЕНИЯ", r"\b(?:МУЖ|ЖЕН)\.", r"\b\d{3}\s*[-–—]\s*\d{3}\b", r"PNRUS", r"МЕСТО\s*РОЖДЕНИЯ"]
+        t = text.upper(); pats = [r"УФМС", r"\bМВД\b", r"ПАСПОРТ\s*ВЫДАН", r"КОД\s*ПОДРАЗДЕЛЕНИЯ", r"\b(?:МУЖ|ЖЕН)\.", r"\b\d{3}\s*[-–—]\s*\d{3}\b", r"PNRUS", r"МЕСТО\s*РОЖДЕНИЯ", r"МЕСТО\s*ЖИТЕЛЬСТВА", r"ЗАРЕГИСТРИРОВАН"]
         return sum(bool(re.search(p, t)) for p in pats)
 
     def _process_multi(self, img, parts, path, out, t0):
@@ -143,14 +170,19 @@ class DocumentPipeline:
                 r = self._process_passport(crop, path, (out / f"page{i}_main").resolve() if (out / f"page{i}_main").mkdir(parents=True, exist_ok=True) is None else out, t0)
                 if r is not None:
                     main = (i, r)
-                    pg.update(kind="main_spread", found=True, fields=r["fields"], confidence=r["confidence"], orientation=r.get("orientation"))
+                    pg.update(kind="main_spread", found=True, fields=r["fields"], confidence=r["confidence"], orientation=r.get("orientation"), page_numbers=[2, 3], page_number_source="main_spread")
                     pages.append(pg); T[f"page{i}"] = time.perf_counter() - t; continue
             reg = read_registration(self, crop)
             if reg["kind"] == "unknown" and reg["cues"] == 0 and main is None:
                 r = self._process_passport(crop, path, (out / f"page{i}_main").resolve() if (out / f"page{i}_main").mkdir(parents=True, exist_ok=True) is None else out, t0)   # повёрнутый разворот: перебор ориентаций
                 if r is not None:
                     main = (i, r); pg.update(kind="main_spread", found=True, fields=r["fields"], confidence=r["confidence"]); pages.append(pg); T[f"page{i}"] = time.perf_counter() - t; continue
-            pg.update(kind=reg["kind"], found=reg["kind"] in ("registration", "passport_page"), stamps=reg["stamps"], fields=reg["fields"], cues=reg["cues"])
+            pg.update(kind=reg["kind"], found=reg["kind"] in ("registration", "passport_page"), stamps=reg["stamps"], fields=reg["fields"], cues=reg["cues"], stamp_list=reg.get("stamp_list", []))
+            try:
+                from .passport_pagenum import read_page_number
+                n, nc, nn = read_page_number(self, crop)
+                if n: pg.update(page_number=n, page_number_source="ocr_pale_digit", page_number_confidence=nc)
+            except Exception: pass
             if reg["series_number"]: pg["series_number"] = f"{reg['series_number']['series']} {reg['series_number']['number']}"
             if reg["kind"] == "registration": regs.append((i, reg))
             if reg["kind"] == "registration" and reg["fields"].get("registration_authority") is None: pg["warnings"] = ["штамп найден, орган регистрации не прочитан"]
@@ -198,6 +230,36 @@ class DocumentPipeline:
             x0, y0, x1, y1 = pg["bbox"]; cv2.rectangle(dbg, (x0, y0), (x1, y1), (0, 200, 0) if pg["found"] else (0, 0, 255), th)
             cv2.putText(dbg, f"{pg['index']}:{pg['kind']}", (x0 + 10, y0 + 40 + 4 * th), cv2.FONT_HERSHEY_SIMPLEX, max(1.0, W0 / 1400), (0, 0, 255), th)
         imwrite(out / "debug.jpg", dbg); res["files"]["debug"] = str(out / "debug.jpg")
+        T["total"] = time.perf_counter() - t0
+        res["timings_sec"] = {k: round(v, 3) for k, v in T.items()}; res["peak_rss_mb"] = round(peak_rss_mb(), 1)
+        with open(out / "result.json", "w", encoding="utf-8") as f: json.dump(res, f, ensure_ascii=False, indent=2, default=str)
+        res["files"]["json"] = str(out / "result.json")
+        return res
+
+    def _process_spread_pages(self, img, path, out, t0, parts=None):
+        """Страницы паспорта РФ без основного разворота (напр. стр. 4–5 на листе А4): номера страниц (бледная цифра в круге / заголовок / чётность), вид страницы,
+        штампы регистрации, перфорированная серия/номер. None, если признаков страниц паспорта нет."""
+        from .passport_pagenum import analyze_pages
+        H0, W0 = img.shape[:2]; T = {}; t = time.perf_counter()
+        try: r = analyze_pages(self, img, parts)
+        except Exception as e:
+            return None
+        if r is None: return None
+        T["pages"] = time.perf_counter() - t
+        pages, summ = r["pages"], r["summary"]
+        F = {}
+        if summ.get("perforated_series_number"):
+            v = summ["perforated_series_number"]; ser, num = v.rsplit(" ", 1)
+            F["series_number_perforated"] = dict(value=v, confidence=0.5 if summ.get("perforated_consistent") else 0.3, note="перфорация внизу страниц (best-effort, для сверки с основным разворотом)")
+        res = {"image": str(path), "image_size": [W0, H0], "engine": "paddle(+tesseract)", "doc_type": "passport_rf", "doc_type_title": "Паспорт гражданина РФ (страницы без основного разворота)",
+               "document": {"type": "passport_rf", "multi_page": len(pages) > 1, "pages_n": len(pages)}, "confidence": 0.6,
+               "route": "passport pages: поворот, разрез по сгибу, номер страницы (бледная цифра в круге), заголовок, штампы, перфорация",
+               "warnings": ["main_spread_not_found: на листе нет основного разворота (страницы 2–3)"], "fields": F, "files": {}, "pages": pages, "summary": {**summ, "has_main_spread": False}}
+        img_dbg = img.copy(); th = max(2, int(max(W0, H0) / 600))
+        for pg in pages:
+            x0, y0, x1, y1 = pg["bbox"]; cv2.rectangle(img_dbg, (x0, y0), (x1, y1), (0, 200, 0), th)
+            cv2.putText(img_dbg, f"p{pg['page_number']}:{pg['kind']}", (x0 + 10, y0 + 40 + 4 * th), cv2.FONT_HERSHEY_SIMPLEX, max(1.0, W0 / 1400), (0, 0, 255), th)
+        imwrite(out / "debug.jpg", img_dbg); res["files"]["debug"] = str(out / "debug.jpg")
         T["total"] = time.perf_counter() - t0
         res["timings_sec"] = {k: round(v, 3) for k, v in T.items()}; res["peak_rss_mb"] = round(peak_rss_mb(), 1)
         with open(out / "result.json", "w", encoding="utf-8") as f: json.dump(res, f, ensure_ascii=False, indent=2, default=str)
@@ -283,7 +345,8 @@ class DocumentPipeline:
 
         t = time.perf_counter()
         aspects = tuple(sorted({t_.aspect for t_ in REGISTRY.values()}))
-        quad, qscore, qmethod = find_card_quad(img, target_aspects=aspects)
+        if getattr(self, "_quad_hint", None) is not None: quad, qscore, qmethod = self._quad_hint, 0.8, "small_card_blob"
+        else: quad, qscore, qmethod = find_card_quad(img, target_aspects=aspects)
         quad = order_corners(quad)
         T["detect_card"] = time.perf_counter() - t
         if allow_page:
@@ -302,11 +365,11 @@ class DocumentPipeline:
         def attempt(q):
             """warp -> OCR -> классификация; если не опознано — пробуем повернуть на 180°."""
             c = warp_card(img, q, size)
-            t_ = time.perf_counter(); ls = self.ocr(c); b_, sc_ = self._classify(ls)
+            t_ = time.perf_counter(); ls = self.ocr(c); b_, sc_ = self._classify(ls, c)
             T["ocr"] = T.get("ocr", 0) + time.perf_counter() - t_
             rot = 0
             if sc_[b_] < self.min_type_conf:
-                t_ = time.perf_counter(); c2 = cv2.rotate(c, cv2.ROTATE_180); ls2 = self.ocr(c2); b2, sc2 = self._classify(ls2)
+                t_ = time.perf_counter(); c2 = cv2.rotate(c, cv2.ROTATE_180); ls2 = self.ocr(c2); b2, sc2 = self._classify(ls2, c2)
                 T["ocr_rot180"] = T.get("ocr_rot180", 0) + time.perf_counter() - t_
                 if sc2[b2] > sc_[b_]:
                     c, ls, b_, sc_, rot = c2, ls2, b2, sc2, 180

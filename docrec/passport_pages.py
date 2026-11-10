@@ -2,6 +2,7 @@
 полное чтение основного разворота (passport.read_passport), best-effort чтение страницы регистрации (штампы, орган, серия/номер) и сверка серии/номера между страницами."""
 from __future__ import annotations
 import re
+from collections import Counter
 import cv2
 import numpy as np
 from .doctypes.passport import cue_count, find_dates, valid_date
@@ -23,6 +24,40 @@ def _fuzzy_cue(text: str, pat: str) -> bool:
     if re.search(pat, text): return True
     word = {r"ЗАРЕГИСТР": "ЗАРЕГИСТРИРОВАН", r"РЕГИСТРАЦИОННОГО": "РЕГИСТРАЦИОННОГО", r"УФМС\s*РОССИИ": "УФМС РОССИИ", r"ОТДЕЛ\s*УФМС": "ОТДЕЛ УФМС", r"МЕСТО\s*ЖИТЕЛЬСТВА": "МЕСТО ЖИТЕЛЬСТВА"}.get(pat)
     return bool(word) and partial_ratio(word, text) >= 0.82 and len(text) <= len(word) + 8
+
+
+def _stamp_list(passes, hits):
+    """Штампы по ориентации с наибольшим числом отметок: тип (ЗАРЕГИСТРИРОВАН / СНЯТ С РЕГИСТРАЦИОННОГО УЧЕТА), печатный орган из строк выше отметки,
+    дата рядом и рукописные строки (best-effort, низкая уверенность — рукописный текст не доверяем)."""
+    marks = [(rot, kind, l) for rot, p, l in hits for kind in [("registered" if p == r"ЗАРЕГИСТР" else "deregistered" if p == r"СНЯТ\s*С" else None)] if kind]
+    if not marks: return []
+    cnt = Counter(rot for rot, _, _ in marks); rot_b = max(cnt, key=lambda r: (cnt[r], r == 0))
+    ms = sorted([(k, l) for r, k, l in marks if r == rot_b], key=lambda x: (x[1].cy, x[1].x0))
+    uniq = []
+    for k, l in ms:       # одна отметка на штамп: сливаем строки одного типа, лежащие вплотную
+        if uniq and uniq[-1][0] == k and abs(uniq[-1][1].cy - l.cy) < 0.03 and abs(uniq[-1][1].x0 - l.x0) < 0.2: continue
+        uniq.append((k, l))
+    ls = sorted(passes[rot_b], key=lambda l: (l.cy, l.x0)); out = []
+    HDR = re.compile(r"МЕСТО\s*ЖИТЕЛЬСТВА|ПОДПИСЬ|ВОИНСК|СЕМЕЙН|^\W*ДЕТИ\W*$")
+    tops = []
+    for i, (k, m) in enumerate(uniq):
+        prev_y = uniq[i - 1][1].cy if i else max(0.0, m.cy - 0.22)
+        tops.append([l for l in ls if max(prev_y + 0.01, m.cy - 0.2) < l.cy < m.cy - 0.003 and abs(l.x0 - m.x0) < 0.25 and not re.search(r"\d{2}\.\d{2}\.\d{2,4}", l.text) and not HDR.search(_norm_up(l.text))])
+    for i, (k, m) in enumerate(uniq):
+        prev_y = uniq[i - 1][1].cy if i else max(0.0, m.cy - 0.22); nxt_y = uniq[i + 1][1].cy if i + 1 < len(uniq) else min(1.0, m.cy + 0.22)
+        top = tops[i]
+        auth_raw = " ".join(l.text for l in top[-3:]); auth = None; ch = []
+        if re.search(r"УФМС|ОТДЕЛ|ПО\s|ОБЛ|РЕСП|РАЙОН", _norm_up(auth_raw)):
+            auth, ch = LX.snap_multi(auth_raw, [("passport/issuer_places", 0.1, 7), ("passport/issuer_words", 0.15, 4)])
+        nxt_ids = {id(l) for l in (tops[i + 1] if i + 1 < len(tops) else [])}
+        below = [l for l in ls if m.cy + 0.003 < l.cy < nxt_y - 0.01 and abs(l.x0 - m.x0) < 0.3 and id(l) not in nxt_ids and not HDR.search(_norm_up(l.text))]
+        dates = [d for l in below + [m] for d, _ in find_dates(l.text) if valid_date(d, 1992)]
+        hand = [l for l in below if not re.search(r"УФМС|ОТДЕЛ|РЕГИСТРАЦ|ЗАРЕГ|СНЯТ|ПОДПИСЬ|М\.П", _norm_up(l.text)) and re.search(r"[A-Za-zА-Яа-я0-9]{3}", l.text)]
+        out.append(dict(type=k, type_text=("ЗАРЕГИСТРИРОВАН" if k == "registered" else "СНЯТ С РЕГИСТРАЦИОННОГО УЧЕТА"), confidence=round(float(m.score), 3),
+                        authority=dict(value=auth, confidence=round(float(np.mean([l.score for l in top[-3:]])) * 0.9, 3) if auth else 0.0, raw=auth_raw, lexicon=[f"{a}→{b}" for a, b, _ in ch]) if auth else None,
+                        date=dates[0] if dates else None,
+                        handwriting=dict(lines=[l.text for l in hand[:6]], confidence=round(float(np.mean([l.score for l in hand])) * 0.3, 3), note="рукописные записи — best-effort, не доверять") if hand else None))
+    return out
 
 
 def read_registration(pipe, crop: np.ndarray) -> dict:
@@ -86,5 +121,6 @@ def read_registration(pipe, crop: np.ndarray) -> dict:
         if years: fields["registration_date"] = dict(value=None, confidence=0.3, note=f"дата не прочитана целиком; в штампе виден год: {', '.join(years)}", partial=True)
     if sn: fields["series_number"] = dict(value=f"{sn['series']} {sn['number']}", series=sn["series"], number=sn["number"], confidence=round(sn["score"], 3), note="вертикальная полоса (серия/номер) на странице")
     if stamps: fields["stamps_handwriting"] = dict(value=None, confidence=0.0, note="рукописные записи (адрес, даты, подпись) не распознаются")
+    stamp_list = _stamp_list(passes, hits)
     kind = "registration" if strong >= 1 else ("passport_page" if sn else "unknown")
-    return dict(kind=kind, cues=int(sum(cues.values())), strong_cues=int(strong), stamps=int(stamps), fields=fields, series_number=sn, lines_n={k: len(v) for k, v in passes.items()})
+    return dict(kind=kind, cues=int(sum(cues.values())), strong_cues=int(strong), stamps=int(stamps), stamp_list=stamp_list, fields=fields, series_number=sn, lines_n={k: len(v) for k, v in passes.items()})

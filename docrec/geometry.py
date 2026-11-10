@@ -193,4 +193,46 @@ def warp_card(img: np.ndarray, quad: np.ndarray, size=(1026, 648)) -> np.ndarray
         q = np.float32([q[3], q[0], q[1], q[2]])
     dst = np.float32([[0, 0], [W - 1, 0], [W - 1, H - 1], [0, H - 1]])
     M = cv2.getPerspectiveTransform(q, dst)
+    up = max(W, H) / max(w, h, 1.0)
+    if up > 2.2:     # мелкая карточка в кадре: сильное увеличение — Lanczos + мягкая резкость (иначе цифры расплываются)
+        out = cv2.warpPerspective(img, M, (W, H), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE)
+        bl = cv2.GaussianBlur(out, (0, 0), 1.6)
+        return cv2.addWeighted(out, 1.6, bl, -0.6, 0)
     return cv2.warpPerspective(img, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+def small_card_crop(img: np.ndarray, max_ratio: float = 0.12, long_side: int = 1100):
+    """Маленькая карточка посреди большого светлого листа (скан А4): находим единственный тёмный блок карточной формы, вырезаем с полями и увеличиваем
+    (Lanczos + резкость) до long_side по длинной стороне. -> (crop, meta) | None."""
+    h, w = img.shape[:2]
+    if max(h, w) < 900: return None
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY); bg = float(np.percentile(g, 92))
+    if bg < 170: return None                  # не светлый лист
+    m = (g.astype(np.float32) < bg - 28).astype(np.uint8)
+    k = max(5, int(0.02 * min(h, w))); m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m)
+    if n < 2: return None
+    i = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA])); x, y, bw, bh = (int(st[i, c]) for c in (cv2.CC_STAT_LEFT, cv2.CC_STAT_TOP, cv2.CC_STAT_WIDTH, cv2.CC_STAT_HEIGHT))
+    ratio = bw * bh / float(w * h); asp = max(bw, bh) / max(1, min(bw, bh))
+    if ratio > max_ratio or ratio < 0.003 or not (1.2 <= asp <= 2.3): return None
+    # точная рамка карточки: светлый корпус карточки чуть темнее листа — порог мягче, берём компонент, пересекающийся с найденным блоком
+    soft = (g.astype(np.float32) < bg - 7).astype(np.uint8)
+    soft = cv2.morphologyEx(soft, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)); soft = cv2.morphologyEx(soft, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    nn, lab2, st2, _ = cv2.connectedComponentsWithStats(soft)
+    cx_, cy_ = x + bw // 2, y + bh // 2; j = int(lab2[cy_, cx_]) if lab2[cy_, cx_] > 0 else 0
+    quad = None
+    if j > 0 and st2[j, cv2.CC_STAT_AREA] < 3.0 * bw * bh:
+        ys_, xs_ = np.where(lab2 == j); pts = np.stack([xs_, ys_], 1).astype(np.float32)
+        hull = cv2.convexHull(pts); ap = cv2.approxPolyDP(hull, 0.03 * cv2.arcLength(hull, True), True)
+        quad = ap[:, 0, :] if len(ap) == 4 else cv2.boxPoints(cv2.minAreaRect(hull))
+    if quad is None: quad = np.float32([[x, y], [x + bw, y], [x + bw, y + bh], [x, y + bh]])
+    quad = np.float32(quad)
+    pw, ph = int(0.08 * bw), int(0.08 * bh)
+    x0, y0, x1, y1 = max(0, x - pw), max(0, y - ph), min(w, x + bw + pw), min(h, y + bh + ph)
+    crop = img[y0:y1, x0:x1]; s = min(4.0, long_side / max(crop.shape[:2]))
+    quad = (quad - np.float32([x0, y0])) * s
+    if s > 1.05:
+        crop = cv2.resize(crop, None, fx=s, fy=s, interpolation=cv2.INTER_LANCZOS4)
+        crop = cv2.addWeighted(crop, 1.5, cv2.GaussianBlur(crop, (0, 0), 1.8), -0.5, 0)
+    else: s = 1.0
+    return crop, {"quad": quad.tolist(), "bbox_src": [x0, y0, x1, y1], "scale": round(float(s), 2), "area_ratio": round(ratio, 4), "note": "маленькая карточка на большом листе: вырезана и увеличена (Lanczos + резкость) перед OCR"}

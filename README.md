@@ -5,7 +5,7 @@
 <h1 align="center">lightdoc-ocr</h1>
 
 <p align="center">
-  Лёгкое офлайн-распознавание российских документов: ВУ, реквизиты с проверкой контрольных сумм, JSON. Только CPU.<br>
+  Лёгкое офлайн-распознавание российских документов: ВУ,<br>реквизиты с проверкой контрольных сумм, JSON. Только CPU.<br>
   Lightweight offline OCR for Russian documents: driver licence, requisites with checksum validation, JSON. CPU only.
 </p>
 

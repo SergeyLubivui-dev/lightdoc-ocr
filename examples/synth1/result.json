@@ -1,0 +1,155 @@
+{
+  "image": "samples/synth1.jpg",
+  "image_size": [
+    1600,
+    1200
+  ],
+  "engine": "paddle",
+  "doc_type": "driver_license_rf",
+  "doc_type_title": "Водительское удостоверение РФ (карточка 2011+, лицевая сторона)",
+  "confidence": 1.0,
+  "type_scores": {
+    "driver_license_rf": 1.0,
+    "passport_rf": 0.0,
+    "sts": 0.0,
+    "snils": 0.0
+  },
+  "corners": {
+    "order": "TL,TR,BR,BL",
+    "points": [
+      [
+        304.1,
+        459.1
+      ],
+      [
+        1160.6,
+        253.1
+      ],
+      [
+        1267.1,
+        792.3
+      ],
+      [
+        464.3,
+        989.1
+      ]
+    ]
+  },
+  "corners_confidence": 0.97,
+  "corners_method": "canny+snap",
+  "card_rotation_applied": 0,
+  "warnings": [],
+  "fields": {
+    "surname": {
+      "value": "ПЕТРОВ",
+      "confidence": 0.992
+    },
+    "surname_lat": {
+      "value": "PETROV",
+      "confidence": 0.981
+    },
+    "given_names": {
+      "value": "АЛЕКСАНДР СЕРГЕЕВИЧ",
+      "confidence": 0.99
+    },
+    "name": {
+      "value": "АЛЕКСАНДР",
+      "confidence": 0.99
+    },
+    "patronymic": {
+      "value": "СЕРГЕЕВИЧ",
+      "confidence": 0.99
+    },
+    "given_names_lat": {
+      "value": "ALEKSANDR SERGEEVICH",
+      "confidence": 0.987
+    },
+    "birth_date": {
+      "value": "14.03.1987",
+      "confidence": 1.0,
+      "valid": true
+    },
+    "birth_place": {
+      "value": "ГОР. КАЗАНЬ",
+      "confidence": 0.949
+    },
+    "birth_place_lat": {
+      "value": "KAZAN",
+      "confidence": 0.959
+    },
+    "issue_date": {
+      "value": "20.10.2011",
+      "confidence": 0.999,
+      "valid": true
+    },
+    "expiry_date": {
+      "value": "20.10.2021",
+      "confidence": 0.967,
+      "valid": true
+    },
+    "issuer": {
+      "value": "ГИБДД 1608",
+      "confidence": 0.956
+    },
+    "issuer_code": {
+      "value": "1608",
+      "confidence": 0.956,
+      "valid": true
+    },
+    "number": {
+      "value": "16 12 345678",
+      "confidence": 0.973,
+      "valid": true
+    },
+    "region": {
+      "value": "РЕСП. ТАТАРСТАН (ТАТАРСТАН)",
+      "confidence": 0.644
+    },
+    "region_lat": {
+      "value": "RESP. TATARSTAN",
+      "confidence": 0.975
+    },
+    "categories": {
+      "value": [
+        "B"
+      ],
+      "confidence": 0.85,
+      "valid": true,
+      "note": "cell-voting (1 cells); line parse=[]"
+    }
+  },
+  "files": {
+    "photo": "examples/synth1/photo.jpg",
+    "json": "examples/synth1/result.json"
+  },
+  "template_calibration": {
+    "labels_used": 4,
+    "scale_y": 1.0356,
+    "shift_y": -0.017,
+    "shift_x": -0.004
+  },
+  "checks": {
+    "dates_order_ok": true
+  },
+  "photo": {
+    "zone_rel": [
+      0.064,
+      0.221,
+      0.308,
+      0.801
+    ],
+    "face_detected": true,
+    "face_confidence": 0.93,
+    "face_center_inside_zone": true
+  },
+  "timings_sec": {
+    "detect_card": 0.032,
+    "warp": 0.0,
+    "ocr": 0.698,
+    "extract": 0.06,
+    "total": 0.805,
+    "total_with_fallback": 1.88
+  },
+  "peak_rss_mb": 404.3,
+  "engine_fallback": "tess -> paddle: использован paddle (+поля из tess)"
+}

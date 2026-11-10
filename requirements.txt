@@ -1,0 +1,8 @@
+numpy>=1.26
+opencv-python-headless>=4.8   # проверено на 5.0.0.93; нужен cv2.FaceDetectorYN (>=4.5.4)
+onnxruntime>=1.17             # проверено на 1.31.1 (CPU)
+tesserocr>=2.8                # Tesseract 5 внутри wheel; модели tessdata_best в docrec/models/tessdata
+Pillow>=10
+rapidocr>=3.10.0              # ОПЦИОНАЛЬНО: запасной движок PP-OCRv5 mobile (onnxruntime); без него работает только Tesseract
+# только для tools/make_synthetic.py (генератор тестовых фото):
+scikit-image>=0.22

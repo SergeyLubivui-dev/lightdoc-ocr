@@ -1,0 +1,23 @@
+# окружения / environments
+.venv*/
+venv/
+__pycache__/
+*.pyc
+# результаты и входные данные / outputs and private inputs
+out/
+out*/
+in/
+input/
+private/
+# изображения: только samples/, examples/, docs/ / images only in samples/, examples/, docs/
+*.jpg
+*.jpeg
+*.png
+!samples/**
+!examples/**
+!docs/**
+# служебное
+*.log
+*.err
+.idea/
+.vscode/

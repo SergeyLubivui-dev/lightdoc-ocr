@@ -1,0 +1,531 @@
+{
+  "image": "samples/synth_page.jpg",
+  "image_size": [
+    1600,
+    1200
+  ],
+  "engine": "tess",
+  "doc_type": "free_text",
+  "doc_type_title": "Произвольный текст / страница договора",
+  "confidence": 0.945,
+  "route": "mode=page",
+  "page_rotation_applied_ccw": 0,
+  "orientation": "OSD: повернуть против часовой на 0° (уверенность 17.1); применено 0°",
+  "warnings": [],
+  "text": "7.\nЮридические адреса, реквизиты и подписи сторон\nЗАКАЗЧИК\nООО «Ромашка»\nЮридический адрес: 101000, г. Москва,\nул. Примерная, 1\nИНН 7708123450, КПП 770801001\nРасчетный счет: 40702810700001234567\nКорр. счет 30101810840000000225\nБИК 044525225\nПАО Сбербанк г. Москва\nТел. +7 (495) 000-00-01\nДиректор\nА.В. Иванов\nИСПОЛНИТЕЛЬ\nПетров Пётр Петрович\nАдрес: 190000, г. Санкт-Петербург,\nул. Образцовая, 2\nИНН 7810555010\nПаспорт: 40 12 № 123456, выдан 01.02.2015\nР/с 40817810800007654321\nБИК 044525225, к/с 30101810840000000225\ne-mail: petrov@example.com\nП.П. Петров",
+  "lines": [
+    {
+      "text": "7.",
+      "confidence": 0.943,
+      "box_rel": [
+        0.1888,
+        0.055,
+        0.2044,
+        0.0717
+      ]
+    },
+    {
+      "text": "Юридические адреса, реквизиты и подписи сторон",
+      "confidence": 0.955,
+      "box_rel": [
+        0.2144,
+        0.055,
+        0.7375,
+        0.0767
+      ]
+    },
+    {
+      "text": "ЗАКАЗЧИК",
+      "confidence": 0.958,
+      "box_rel": [
+        0.0762,
+        0.1383,
+        0.1837,
+        0.155
+      ]
+    },
+    {
+      "text": "ООО «Ромашка»",
+      "confidence": 0.902,
+      "box_rel": [
+        0.0756,
+        0.1875,
+        0.2031,
+        0.2025
+      ]
+    },
+    {
+      "text": "Юридический адрес: 101000, г. Москва,",
+      "confidence": 0.963,
+      "box_rel": [
+        0.0762,
+        0.2258,
+        0.3912,
+        0.245
+      ]
+    },
+    {
+      "text": "ул. Примерная, 1",
+      "confidence": 0.959,
+      "box_rel": [
+        0.0756,
+        0.2642,
+        0.2094,
+        0.2833
+      ]
+    },
+    {
+      "text": "ИНН 7708123450, КПП 770801001",
+      "confidence": 0.952,
+      "box_rel": [
+        0.0762,
+        0.3025,
+        0.3406,
+        0.32
+      ]
+    },
+    {
+      "text": "Расчетный счет: 40702810700001234567",
+      "confidence": 0.928,
+      "box_rel": [
+        0.0762,
+        0.3408,
+        0.3987,
+        0.3558
+      ]
+    },
+    {
+      "text": "Корр. счет 30101810840000000225",
+      "confidence": 0.925,
+      "box_rel": [
+        0.0762,
+        0.3792,
+        0.3525,
+        0.3983
+      ]
+    },
+    {
+      "text": "БИК 044525225",
+      "confidence": 0.963,
+      "box_rel": [
+        0.0762,
+        0.4175,
+        0.1963,
+        0.4325
+      ]
+    },
+    {
+      "text": "ПАО Сбербанк г. Москва",
+      "confidence": 0.965,
+      "box_rel": [
+        0.0762,
+        0.4558,
+        0.2675,
+        0.475
+      ]
+    },
+    {
+      "text": "Тел. +7 (495) 000-00-01",
+      "confidence": 0.938,
+      "box_rel": [
+        0.075,
+        0.4942,
+        0.2606,
+        0.5117
+      ]
+    },
+    {
+      "text": "Директор",
+      "confidence": 0.96,
+      "box_rel": [
+        0.0756,
+        0.5708,
+        0.1512,
+        0.59
+      ]
+    },
+    {
+      "text": "А.В. Иванов",
+      "confidence": 0.962,
+      "box_rel": [
+        0.2512,
+        0.5708,
+        0.3425,
+        0.5858
+      ]
+    },
+    {
+      "text": "ИСПОЛНИТЕЛЬ",
+      "confidence": 0.937,
+      "box_rel": [
+        0.5387,
+        0.1383,
+        0.6887,
+        0.155
+      ]
+    },
+    {
+      "text": "Петров Пётр Петрович",
+      "confidence": 0.964,
+      "box_rel": [
+        0.5387,
+        0.1875,
+        0.7169,
+        0.2067
+      ]
+    },
+    {
+      "text": "Адрес: 190000, г. Санкт-Петербург,",
+      "confidence": 0.958,
+      "box_rel": [
+        0.5375,
+        0.2258,
+        0.8187,
+        0.245
+      ]
+    },
+    {
+      "text": "ул. Образцовая, 2",
+      "confidence": 0.951,
+      "box_rel": [
+        0.5381,
+        0.2642,
+        0.6775,
+        0.2833
+      ]
+    },
+    {
+      "text": "ИНН 7810555010",
+      "confidence": 0.959,
+      "box_rel": [
+        0.5387,
+        0.3025,
+        0.6706,
+        0.3175
+      ]
+    },
+    {
+      "text": "Паспорт: 40 12 № 123456, выдан 01.02.2015",
+      "confidence": 0.961,
+      "box_rel": [
+        0.5387,
+        0.3408,
+        0.8875,
+        0.36
+      ]
+    },
+    {
+      "text": "Р/с 40817810800007654321",
+      "confidence": 0.893,
+      "box_rel": [
+        0.5387,
+        0.3792,
+        0.7538,
+        0.3958
+      ]
+    },
+    {
+      "text": "БИК 044525225, к/с 30101810840000000225",
+      "confidence": 0.927,
+      "box_rel": [
+        0.5387,
+        0.4175,
+        0.8862,
+        0.435
+      ]
+    },
+    {
+      "text": "e-mail: petrov@example.com",
+      "confidence": 0.905,
+      "box_rel": [
+        0.5381,
+        0.4558,
+        0.7575,
+        0.475
+      ]
+    },
+    {
+      "text": "П.П. Петров",
+      "confidence": 0.945,
+      "box_rel": [
+        0.6338,
+        0.5325,
+        0.725,
+        0.5517
+      ]
+    }
+  ],
+  "parties": [
+    {
+      "role": null,
+      "name": null,
+      "requisites": []
+    },
+    {
+      "role": "Заказчик",
+      "name": "ООО «Ромашка»",
+      "requisites": [
+        {
+          "type": "inn",
+          "value": "7708123450",
+          "valid": true,
+          "confidence": 0.947,
+          "party": "Заказчик"
+        },
+        {
+          "type": "kpp",
+          "value": "770801001",
+          "valid": true,
+          "confidence": 0.947,
+          "party": "Заказчик"
+        },
+        {
+          "type": "bik",
+          "value": "044525225",
+          "valid": true,
+          "confidence": 0.947,
+          "party": "Заказчик"
+        },
+        {
+          "type": "corr_account",
+          "value": "30101810840000000225",
+          "valid": true,
+          "confidence": 0.947,
+          "party": "Заказчик"
+        },
+        {
+          "type": "settlement_account",
+          "value": "40702810700001234567",
+          "valid": true,
+          "confidence": 0.947,
+          "party": "Заказчик"
+        },
+        {
+          "type": "phone",
+          "value": "+74950000001",
+          "valid": true,
+          "confidence": 0.947,
+          "party": "Заказчик"
+        },
+        {
+          "type": "organization",
+          "value": "ООО «Ромашка»",
+          "valid": true,
+          "confidence": 0.947,
+          "party": "Заказчик"
+        },
+        {
+          "type": "person_short",
+          "value": "Директор А.В.",
+          "valid": true,
+          "confidence": 0.947,
+          "party": "Заказчик"
+        }
+      ]
+    },
+    {
+      "role": "Исполнитель",
+      "name": "Петров Пётр Петрович",
+      "requisites": [
+        {
+          "type": "inn",
+          "value": "7810555010",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        },
+        {
+          "type": "bik",
+          "value": "044525225",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        },
+        {
+          "type": "corr_account",
+          "value": "30101810840000000225",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        },
+        {
+          "type": "settlement_account",
+          "value": "40817810800007654321",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        },
+        {
+          "type": "passport",
+          "value": "40 12 123456",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        },
+        {
+          "type": "date",
+          "value": "01.02.2015",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        },
+        {
+          "type": "email",
+          "value": "petrov@example.com",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        },
+        {
+          "type": "person",
+          "value": "Петров Пётр Петрович",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        },
+        {
+          "type": "person_short",
+          "value": "П.П. Петров",
+          "valid": true,
+          "confidence": 0.94,
+          "party": "Исполнитель"
+        }
+      ]
+    }
+  ],
+  "requisites": [
+    {
+      "type": "inn",
+      "value": "7708123450",
+      "valid": true,
+      "confidence": 0.947,
+      "party": "Заказчик"
+    },
+    {
+      "type": "kpp",
+      "value": "770801001",
+      "valid": true,
+      "confidence": 0.947,
+      "party": "Заказчик"
+    },
+    {
+      "type": "bik",
+      "value": "044525225",
+      "valid": true,
+      "confidence": 0.947,
+      "party": "Заказчик"
+    },
+    {
+      "type": "corr_account",
+      "value": "30101810840000000225",
+      "valid": true,
+      "confidence": 0.947,
+      "party": "Заказчик"
+    },
+    {
+      "type": "settlement_account",
+      "value": "40702810700001234567",
+      "valid": true,
+      "confidence": 0.947,
+      "party": "Заказчик"
+    },
+    {
+      "type": "phone",
+      "value": "+74950000001",
+      "valid": true,
+      "confidence": 0.947,
+      "party": "Заказчик"
+    },
+    {
+      "type": "organization",
+      "value": "ООО «Ромашка»",
+      "valid": true,
+      "confidence": 0.947,
+      "party": "Заказчик"
+    },
+    {
+      "type": "person_short",
+      "value": "Директор А.В.",
+      "valid": true,
+      "confidence": 0.947,
+      "party": "Заказчик"
+    },
+    {
+      "type": "inn",
+      "value": "7810555010",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    },
+    {
+      "type": "bik",
+      "value": "044525225",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    },
+    {
+      "type": "corr_account",
+      "value": "30101810840000000225",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    },
+    {
+      "type": "settlement_account",
+      "value": "40817810800007654321",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    },
+    {
+      "type": "passport",
+      "value": "40 12 123456",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    },
+    {
+      "type": "date",
+      "value": "01.02.2015",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    },
+    {
+      "type": "email",
+      "value": "petrov@example.com",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    },
+    {
+      "type": "person",
+      "value": "Петров Пётр Петрович",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    },
+    {
+      "type": "person_short",
+      "value": "П.П. Петров",
+      "valid": true,
+      "confidence": 0.94,
+      "party": "Исполнитель"
+    }
+  ],
+  "validation_issues": [],
+  "noise_filtered": [],
+  "fields": {},
+  "files": {
+    "text": "examples/synth_page/text.txt"
+  },
+  "timings_sec": {
+    "osd": 0.406,
+    "ocr": 0.894,
+    "postproc": 0.007,
+    "requisites": 0.003,
+    "total": 1.348
+  },
+  "peak_rss_mb": 198.8
+}

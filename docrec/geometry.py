@@ -183,13 +183,14 @@ def find_card_quad(img: np.ndarray, target_aspects=(ID1_ASPECT,), max_side=800):
 
 
 def warp_card(img: np.ndarray, quad: np.ndarray, size=(1026, 648)) -> np.ndarray:
-    """Перспективное выпрямление. quad: TL,TR,BR,BL. Длинная сторона — горизонталь."""
+    """Перспективное выпрямление. quad: TL,TR,BR,BL. Длинная сторона квада = длинная сторона `size`."""
     q = order_corners(quad)
     w = (np.linalg.norm(q[0] - q[1]) + np.linalg.norm(q[3] - q[2])) / 2
     h = (np.linalg.norm(q[0] - q[3]) + np.linalg.norm(q[1] - q[2])) / 2
-    if h > w:  # карточка стоит вертикально — повернём порядок углов на 90°
-        q = np.float32([q[3], q[0], q[1], q[2]])
     W, H = size
+    # длинная сторона карточки совпадает с длинной стороной целевого размера (ID-1 — горизонталь, СТС — вертикаль)
+    if (h > w) == (W >= H):
+        q = np.float32([q[3], q[0], q[1], q[2]])
     dst = np.float32([[0, 0], [W - 1, 0], [W - 1, H - 1], [0, H - 1]])
     M = cv2.getPerspectiveTransform(q, dst)
     return cv2.warpPerspective(img, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)

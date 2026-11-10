@@ -5,7 +5,7 @@
 <h1 align="center">lightdoc-ocr</h1>
 
 <p align="center">
-  Лёгкое офлайн-распознавание российских документов: ВУ,<br>реквизиты с проверкой контрольных сумм, JSON. Только CPU.<br>
+  Лёгкое офлайн-распознавание российских документов: ВУ, реквизиты с проверкой контрольных сумм, JSON. Только CPU.<br>
   Lightweight offline OCR for Russian documents: driver licence, requisites with checksum validation, JSON. CPU only.
 </p>
 
@@ -46,7 +46,28 @@
   исправление «двойников» кириллица↔латиница, реквизиты по каждой стороне договора с проверкой контрольных сумм:
   ИНН (10/12), КПП, БИК, р/с и к/с (ключ по БИК), СНИЛС, ОГРН/ОГРНИП, паспорт, телефоны, даты, e-mail, организации, ФИО.
 - Результат — JSON (у каждого поля `confidence`, у реквизитов `valid`) + картинки (`card.jpg`, `photo.jpg`, `debug*.jpg`) + `text.txt`.
-- Заготовки (только опознаются): паспорт РФ, СТС, СНИЛС-карта.
+- **СТС** (свидетельство о регистрации ТС, лицевая сторона, фото портретной карточки): рег. знак, VIN, марка/модель, тип, категория, год,
+  шасси, кузов, цвет, мощность (кВт/л.с.), экологический класс, массы, ПТС, номер СТС. У каждого поля `confidence` и `valid`
+  (формат рег. знака с омоглифами, VIN 17 знаков без I/O/Q, ПТС, диапазон года, словари цветов/классов); значения у края карточки помечены `partial`.
+- Заготовки (только опознаются): паспорт РФ, СНИЛС-карта.
+
+### Поддерживаемые типы
+
+| Тип | Статус | Поля |
+|---|---|---|
+| Водительское удостоверение РФ (2011+, лицо) | полностью | 18 полей, фото, категории по ячейкам |
+| СТС (лицо) | полностью | 15 полей, валидаторы, `partial` у края |
+| Страница / договор | полностью | текст, реквизиты с контрольными суммами |
+| Паспорт РФ, СНИЛС-карта | заготовка | только опознаются |
+
+### Привязка полей по последовательности
+
+Значения на бланках часто смещены относительно подписей (особенно бледная машинная печать в СТС). Поэтому тип документа задаёт
+**упорядоченный список подписей**; подписи ищутся нечётко (с учётом омоглифов), затем динамическим программированием выбирается
+максимальная **монотонная** цепочка (пропущенная или искажённая подпись не ломает остальные — её позиция интерполируется), а строки значений
+распределяются между соседними подписями с оценкой общего сдвига. Для бледной печати слои разделяются: тёмные подписи читает Tesseract,
+значения (с вычтенными подписями и усиленным контрастом) — Paddle, затем выбирается лучший вариант по каждому полю (`valid`, затем `confidence`).
+Для ВУ те же идеи применены к калибровке шаблона (монотонный отбор подписей), шаблонные зоны остаются запасом. Код: `docrec/anchors.py`, `docrec/ink.py`, `docrec/doctypes/sts.py`.
 
 ## Стек
 
@@ -57,7 +78,7 @@ Python 3.11+, **Tesseract 5.5** через `tesserocr` (tessdata_best, rus+eng; 
 ## Требования к железу
 
 Только CPU, GPU не нужен; 2 ядер достаточно (Tesseract однопоточный). Пик RAM: **~150–185 МБ** (Tesseract), до **~350 МБ**, если сработал
-запасной проход Paddle. Замер на Ryzen 9 5900X (Windows, 1 процесс): ВУ ≈ **1.5 с**, страница A4 (1600×1200) ≈ **2.1 с**.
+запасной проход Paddle (СТС всегда использует оба движка: **~330–430 МБ**, ≈ **3–6 с**). Замер на Ryzen 9 5900X (Windows, 1 процесс): ВУ ≈ **1.5 с**, страница A4 (1600×1200) ≈ **2.1 с**.
 `--fast` (tessdata_fast) быстрее примерно на 30 %, но чуть хуже по кириллице.
 
 ## Установка
@@ -132,7 +153,7 @@ class MyDoc(DocType):
 - Tesseract плохо читает совсем мелкую латиницу (<~10 px) и сильный блик; при слабом результате включается Paddle-запас (если установлен).
 - Страница: печать поверх текста закрывает слова; наклон >10–15° не выпрямляется (поворот только кратный 90°).
 - Низкое разрешение (карточка < ~700 px по ширине) резко ухудшает цифры (`warnings: low_resolution`).
-- Нет MRZ; паспорт, СТС, СНИЛС-карта пока только опознаются. Проверено на небольшом числе реальных и синтетических снимков — не заменяет ручной контроль.
+- СТС: проверено на одном реальном и синтетических снимках; суффикс модели (S↔5), длинные значения у обреза карточки и цвет читаются хуже, смотрите `confidence`/`partial`. Нет MRZ; паспорт и СНИЛС-карта пока только опознаются. Проверено на небольшом числе реальных и синтетических снимков — не заменяет ручной контроль.
 - Не используйте для чужих документов без законного основания; обработка персональных данных регулируется законом.
 
 ## Лицензии
@@ -156,7 +177,28 @@ Lightweight, fully offline recognition of Russian documents. CPU-only; no image 
   Latin↔Cyrillic homoglyph fixes, per-party requisites with checksum validation: INN (10/12), KPP, BIK, settlement/correspondent accounts
   (BIK-keyed), SNILS, OGRN/OGRNIP, passport, phones, dates, e-mail, organisations, person names.
 - Output: JSON (per-field `confidence`, requisites carry `valid`) + images (`card.jpg`, `photo.jpg`, `debug*.jpg`) + `text.txt`.
-- Stubs (classification only): Russian passport, vehicle registration (STS), SNILS card.
+- **Vehicle registration certificate (STS)**, front side, portrait card photo: plate, VIN, make/model, type, category, year, chassis, body,
+  colour, power (kW/hp), eco class, masses, PTS, STS number. Each field has `confidence` and `valid` (plate format with homoglyphs, 17-char VIN without I/O/Q,
+  PTS, year range, colour/class vocabularies); values cut by the card edge are flagged `partial`.
+- Stubs (classification only): Russian passport, SNILS card.
+
+### Supported types
+
+| Type | Status | Fields |
+|---|---|---|
+| Russian driver licence (2011+, front) | full | 18 fields, photo, per-cell categories |
+| STS (front) | full | 15 fields, validators, `partial` at the edge |
+| Free-text page / contract | full | text, checksum-validated requisites |
+| Russian passport, SNILS card | stub | classification only |
+
+### Sequence-anchored field matching
+
+Values on forms are often shifted relative to their labels (especially the faint typed text on the STS). Each document type therefore declares
+an **ordered list of labels**; labels are fuzzy-matched (homoglyph-aware), a dynamic program keeps the longest **monotone** chain (a missed or garbled label
+does not break the others — its position is interpolated), and value lines are assigned between neighbouring labels with a global shift estimate.
+For faint print the ink layers are separated: dark labels go to Tesseract, values (labels masked out, contrast boosted) go to Paddle; the best candidate per field wins
+(`valid`, then `confidence`). The driver licence uses the same idea for template calibration (monotone label selection); template zones stay as the fallback.
+Code: `docrec/anchors.py`, `docrec/ink.py`, `docrec/doctypes/sts.py`.
 
 ## Stack
 
@@ -165,7 +207,7 @@ Python 3.11+, **Tesseract 5.5** via `tesserocr` (tessdata_best, rus+eng; the eng
 
 ## Hardware
 
-CPU only, no GPU; 2 cores are enough (Tesseract is single-threaded). Peak RAM **~150–185 MB** (Tesseract), up to **~350 MB** when the Paddle fallback kicks in.
+CPU only, no GPU; 2 cores are enough (Tesseract is single-threaded). Peak RAM **~150–185 MB** (Tesseract), up to **~350 MB** when the Paddle fallback kicks in (the STS always uses both engines: **~330–430 MB**, ≈ **3–6 s**).
 Measured on a Ryzen 9 5900X (Windows, one process): driver licence ≈ **1.5 s**, A4 page (1600×1200) ≈ **2.1 s**. `--fast` (tessdata_fast) is ~30 % faster, slightly less accurate on Cyrillic.
 
 ## Install
@@ -208,7 +250,7 @@ up from the registry (see the example in the Russian section). Debug with `debug
 - Tesseract struggles with very small Latin text (<~10 px) and strong glare; the Paddle fallback (if installed) covers part of these cases.
 - Pages: stamps over text hide words; skew >10–15° is not corrected (only 90° steps).
 - Low resolution (card narrower than ~700 px) hurts digits (`warnings: low_resolution`).
-- No MRZ; passport/STS/SNILS card are classification stubs. Tested on a small set of real and synthetic images — not a substitute for manual review.
+- STS: tested on one real and synthetic photos; the model suffix (S↔5), long values cut at the card edge and colour are read less reliably — see `confidence`/`partial`. No MRZ; passport/SNILS card are classification stubs. Tested on a small set of real and synthetic images — not a substitute for manual review.
 - Do not process other people's documents without a legal basis; personal data processing is regulated by law.
 
 ## Licenses

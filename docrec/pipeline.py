@@ -107,6 +107,7 @@ class DocumentPipeline:
 
     def _weak(self, res) -> bool:
         if res["doc_type"] == "unknown": return True
+        if getattr(REGISTRY[res["doc_type"]], "hybrid_internal", False): return False
         exp = getattr(REGISTRY[res["doc_type"]], "expected_fields", None)
         return bool(exp) and sum(k in res["fields"] for k in exp) < 0.85 * len(exp)
 
@@ -193,6 +194,11 @@ class DocumentPipeline:
             card = warp_card(img, quad, size)
             if rotation: card = cv2.rotate(card, cv2.ROTATE_180)
             t = time.perf_counter(); lines = self.ocr(card); T["ocr_retype"] = time.perf_counter() - t
+            sc0 = REGISTRY[doc_type].classify(lines)
+            if sc0 < 0.5:   # возможно, документ вверх ногами после перевыпрямления
+                c2 = cv2.rotate(card, cv2.ROTATE_180); l2 = self.ocr(c2); sc2 = REGISTRY[doc_type].classify(l2)
+                if sc2 > sc0 + 0.05: card, lines, sc0, rotation = c2, l2, sc2, (rotation + 180) % 360
+            scores[doc_type] = max(scores[doc_type], sc0); best = doc_type
 
         warnings_ = []
         card_w_src = float((np.linalg.norm(quad[0] - quad[1]) + np.linalg.norm(quad[3] - quad[2])) / 2)
@@ -215,7 +221,7 @@ class DocumentPipeline:
         photo = None
         if doc_type != "unknown":
             t = time.perf_counter()
-            ex = REGISTRY[doc_type].extract(card, lines, rec=self._rec_fn(), cell=self._cell_fn())
+            ex = REGISTRY[doc_type].extract(card, lines, rec=self._rec_fn(), cell=self._cell_fn(), ocr=self.ocr, paddle=(self.paddle if self._paddle_available() else None))
             res["fields"] = {k: v.as_dict() for k, v in ex.fields.items()}
             res.update({k: v for k, v in ex.extra.items()})
             T["extract"] = time.perf_counter() - t

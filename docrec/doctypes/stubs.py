@@ -10,12 +10,6 @@ class PassportRF(DocType):
 
 
 @register
-class VehicleRegistrationSTS(DocType):
-    name = "sts"; title_ru = "Свидетельство о регистрации ТС (СТС)"
-    keywords = [("СВИДЕТЕЛЬСТВО О РЕГИСТРАЦИИ", 3), ("ТРАНСПОРТНОГО СРЕДСТВА", 2), ("ИДЕНТИФИКАЦИОННЫЙ НОМЕР VIN", 1), ("РЕГИСТРАЦИОННЫЙ ЗНАК", 1)]
-
-
-@register
 class SNILS(DocType):
     name = "snils"; title_ru = "СНИЛС"
     keywords = [("СТРАХОВОЕ СВИДЕТЕЛЬСТВО", 3), ("ОБЯЗАТЕЛЬНОГО ПЕНСИОННОГО СТРАХОВАНИЯ", 2), ("СНИЛС", 1)]

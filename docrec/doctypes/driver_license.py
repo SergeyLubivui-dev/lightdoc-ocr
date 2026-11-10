@@ -193,6 +193,21 @@ LABEL_X0 = 0.352
 _LABEL_KEY = re.compile(r"^\s*(\d)\s*([abcабс]?)\s*[.)]?\s*$", re.I)
 
 
+def _monotone(pairs):
+    """Наибольшая строго возрастающая подпоследовательность по паре (y в шаблоне, y реальный) — LIS, O(n²)."""
+    pairs = sorted(pairs)
+    n = len(pairs)
+    if n < 2: return pairs
+    best = [1] * n; prev = [-1] * n
+    for i in range(n):
+        for j in range(i):
+            if pairs[j][0] < pairs[i][0] and pairs[j][1] < pairs[i][1] and best[j] + 1 > best[i]:
+                best[i], prev[i] = best[j] + 1, j
+    i = max(range(n), key=best.__getitem__); out = []
+    while i >= 0: out.append(pairs[i]); i = prev[i]
+    return out[::-1]
+
+
 def calibrate(lines):
     """Оцениваем сдвиг/масштаб по Y и сдвиг по X по найденным подписям полей (1. 2. 3. 4a) 4c) 5. 8.).
     Нужно, когда рамка карточки найдена с погрешностью в 1–3 %. Возвращает (a, b, dx): y_real = a*y_tpl + b."""
@@ -204,6 +219,9 @@ def calibrate(lines):
         key = m.group(1) + m.group(2).lower().replace("а", "a").replace("б", "b").replace("с", "c")
         if key in LABEL_CY and 0.30 < l.x0 < 0.42:
             ys.append((LABEL_CY[key], l.cy)); xs.append(l.x0 - LABEL_X0)
+    if len(ys) < 3:
+        return 1.0, 0.0, 0.0, len(ys)
+    ys = _monotone(ys)   # последовательность подписей обязана идти сверху вниз: ложные срабатывания вне порядка отбрасываем
     if len(ys) < 3:
         return 1.0, 0.0, 0.0, len(ys)
     t, r = np.array(ys).T
@@ -250,7 +268,7 @@ class DriverLicenseRF(DocType):
         return float(min(1.0, 0.75 * base + 0.5 * struct))
 
     # ---- извлечение
-    def extract(self, card: np.ndarray, lines: list[Line], rec=None, cell=None) -> Extraction:
+    def extract(self, card: np.ndarray, lines: list[Line], rec=None, cell=None, ocr=None, paddle=None) -> Extraction:
         ex = Extraction(photo_zone=PHOTO_ZONE)
         F = ex.fields
         ca, cb, cdx, n_lab = calibrate(lines)
@@ -418,7 +436,7 @@ class DriverLicenseRF(DocType):
         cats, cats_conf, cats_note = parse_categories_zone(card, zl, (ca, cb, cdx), cell, rec)
         if cats:
             F["categories"] = Field(cats, cats_conf, cats_note)
-        # сверка латиницы с кириллицей по ICAO-транслитерации (исправляет «KAZANSKIL» → «KAZANSKII»)
+        # сверка латиницы с кириллицей по ICAO-транслитерации (исправляет «KRASNODARSKIL» → «KRASNODARSKII»)
         for ru_k, la_k in (("surname", "surname_lat"), ("given_names", "given_names_lat"), ("birth_place", "birth_place_lat"),
                            ("region", "region_lat"), ("issuer", "issuer_lat")):
             if ru_k in F and la_k in F and isinstance(F[ru_k].value, str) and isinstance(F[la_k].value, str):

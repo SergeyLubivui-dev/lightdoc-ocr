@@ -20,10 +20,12 @@ class Field:
     confidence: float = 0.0
     note: str | None = None
     valid: bool | None = None
+    partial: bool | None = None
 
     def as_dict(self):
         d = {"value": self.value, "confidence": round(float(self.confidence), 3)}
         if self.valid is not None: d["valid"] = self.valid
+        if self.partial: d["partial"] = True
         if self.note: d["note"] = self.note
         return d
 
@@ -44,6 +46,7 @@ class DocType:
     keywords: ClassVar[list[tuple[str, float]]] = []
     implemented: ClassVar[bool] = False
     expected_fields: ClassVar[list[str]] = []
+    hybrid_internal: ClassVar[bool] = False   # экстрактор сам решает, когда звать запасной движок
 
     def classify(self, lines: list[Line]) -> float:
         """0..1 — уверенность, что это данный тип. Базовая версия: взвешенные ключевые слова."""
@@ -56,7 +59,7 @@ class DocType:
                 got += w * min(1.0, (r - 0.78) / 0.17)
         return min(1.0, got / tot)
 
-    def extract(self, card: np.ndarray, lines: list[Line], rec=None, cell=None) -> Extraction:  # pragma: no cover
+    def extract(self, card: np.ndarray, lines: list[Line], rec=None, cell=None, ocr=None, paddle=None) -> Extraction:  # pragma: no cover
         ex = Extraction()
         ex.fields["raw_lines"] = Field([l.text for l in lines], 0.0, "extractor for this type is not implemented yet")
         return ex

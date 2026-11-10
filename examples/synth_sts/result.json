@@ -1,0 +1,184 @@
+{
+  "image": "samples/synth_sts1.jpg",
+  "image_size": [
+    1200,
+    1700
+  ],
+  "engine": "tess",
+  "doc_type": "sts",
+  "doc_type_title": "Свидетельство о регистрации ТС (СТС), лицевая сторона",
+  "confidence": 0.739,
+  "type_scores": {
+    "sts": 0.739,
+    "driver_license_rf": 0.258,
+    "passport_rf": 0.0,
+    "snils": 0.0
+  },
+  "corners": {
+    "order": "TL,TR,BR,BL",
+    "points": [
+      [
+        284.3,
+        284.9
+      ],
+      [
+        1024.3,
+        362.7
+      ],
+      [
+        895.4,
+        1411.0
+      ],
+      [
+        192.4,
+        1337.2
+      ]
+    ]
+  },
+  "corners_confidence": 0.984,
+  "corners_method": "canny+snap",
+  "card_rotation_applied": 0,
+  "warnings": [],
+  "fields": {
+    "curb_mass_kg": {
+      "value": 1060,
+      "confidence": 0.994,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "max_mass_kg": {
+      "value": 1560,
+      "confidence": 0.991,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "eco_class": {
+      "value": "четвёртый",
+      "confidence": 0.997,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "power": {
+      "value": {
+        "kw": 64.0,
+        "hp": 87.0
+      },
+      "confidence": 0.997,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "color": {
+      "value": "Серебристый",
+      "confidence": 0.984,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "body": {
+      "value": "XTA219090E1234567",
+      "confidence": 0.998,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "chassis": {
+      "value": "ОТСУТСТВУЕТ",
+      "confidence": 0.598,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "year": {
+      "value": "2014",
+      "confidence": 0.998,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "category": {
+      "value": "B",
+      "confidence": 0.934,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "vehicle_type": {
+      "value": "Легковой седан",
+      "confidence": 0.958,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "make_model": {
+      "value": "ЛАДА 2190",
+      "confidence": 0.914,
+      "valid": true,
+      "note": "engine=paddle"
+    },
+    "vin": {
+      "value": "XTA219090E1234567",
+      "confidence": 0.999,
+      "valid": true,
+      "note": "контрольная цифра (поз.9) не совпала — информативно, для РФ/ЕС не обязательна; engine=paddle"
+    },
+    "plate": {
+      "value": "А123ВС77",
+      "confidence": 0.994,
+      "valid": true,
+      "note": "A123BC77; engine=paddle"
+    },
+    "pts": {
+      "value": "77УТ123456",
+      "confidence": 0.836,
+      "valid": true
+    },
+    "sts_number": {
+      "value": "77 12 123456",
+      "confidence": 0.961,
+      "valid": true
+    }
+  },
+  "files": {
+    "card": "examples/synth_sts/card.jpg",
+    "debug": "examples/synth_sts/debug.jpg",
+    "debug_card": "examples/synth_sts/debug_card.jpg"
+  },
+  "labels": {
+    "found": [
+      "plate",
+      "vin",
+      "make_model",
+      "vehicle_type",
+      "category",
+      "year",
+      "chassis",
+      "body",
+      "color",
+      "power",
+      "eco_class",
+      "max_mass_kg",
+      "curb_mass_kg",
+      "temp_reg"
+    ],
+    "missing": []
+  },
+  "value_engines": [
+    {
+      "engine": "paddle",
+      "shift_rel": 0.317,
+      "cost": 0.744,
+      "labels_with_value": 14
+    }
+  ],
+  "checks": {
+    "used_paddle": true,
+    "sequence": {
+      "shift_rel": 0.317,
+      "cost": 0.744,
+      "labels_with_value": 14
+    }
+  },
+  "timings_sec": {
+    "detect_card": 0.139,
+    "warp": 0.0,
+    "ocr": 0.709,
+    "ocr_retype": 0.251,
+    "extract": 1.611,
+    "total": 2.771
+  },
+  "peak_rss_mb": 429.1
+}

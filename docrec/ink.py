@@ -17,3 +17,20 @@ def split_ink(card_bgr: np.ndarray, label_th: float = 90.0, dilate: int = 5, gai
     value = np.clip(255 - vv * gain, 0, 255).astype(np.uint8)
     ll = np.clip(255 - np.where(d > label_th * 0.6, d, 0) * 1.2, 0, 255).astype(np.uint8)
     return cv2.cvtColor(ll, cv2.COLOR_GRAY2BGR), cv2.cvtColor(value, cv2.COLOR_GRAY2BGR)
+
+
+def split_layers(card_bgr, prefer_font: bool = True):
+    """Слои «подписи» / «значения»: по шрифту (fontsep) если классы разделились, иначе по яркости (split_ink). -> (label_img, value_img, info)."""
+    if prefer_font and max(card_bgr.shape[:2]) >= 1000:
+        try:
+            from .fontsep import separate
+            r = separate(card_bgr)
+            if r.get("ok"):
+                return r["label_img"], r["value_img"], dict(method="font", **r["info"])
+            info = dict(r.get("info") or {})
+        except Exception as e:
+            info = {"error": repr(e)[:80]}
+    else:
+        info = {}
+    L, V = split_ink(card_bgr)
+    return L, V, dict(method="brightness", **info)

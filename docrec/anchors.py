@@ -141,3 +141,26 @@ def assign_values(specs: list[LabelSpec], pos: list[tuple[float, bool]], values:
     shift = float(np.clip(shift, -0.3, 0.6))
     assign, c1 = run(shift)
     return assign, {"shift_rel": round(shift, 3), "cost": round(c1, 3), "labels_with_value": len(assign)}
+
+
+def assign_by_rows(specs: list[LabelSpec], pos: list[tuple[float, bool]], values: list[Line], tol=0.4) -> tuple[dict[str, list[Line]], dict]:
+    """Строчное сопоставление для «чистого» слоя значений (после разделения по шрифту): значение принадлежит ближайшей подписи НАД ним
+    (или на той же строке с допуском tol·шаг). Не зависит от монотонного выравнивания, поэтому осколки и потерянные строки соседей не сдвигают остальные поля.
+    Если строк больше, чем multi, берём самые длинные."""
+    ys = [p[0] for p in pos]; L = len(specs)
+    spac = [max(0.02, (ys[i + 1] - ys[i]) if i + 1 < L else (ys[i] - ys[i - 1] if i else 0.04)) for i in range(L)]
+    order = sorted(range(L), key=lambda i: ys[i])
+    got: dict[int, list[Line]] = {}
+    for v in sorted(values, key=lambda v: (v.cy, v.x0)):
+        best = None
+        for i in order:
+            if ys[i] - tol * spac[i] <= v.cy: best = i
+            else: break
+        if best is None: continue
+        got.setdefault(best, []).append(v)
+    out = {}
+    for i, ls in got.items():
+        m = specs[i].multi
+        if len(ls) > m: ls = sorted(sorted(ls, key=lambda l: -len(re.sub(r"\W", "", l.text)))[:m], key=lambda l: (l.cy, l.x0))
+        out[specs[i].key] = ls
+    return out, {"shift_rel": 0.0, "cost": 0.0, "labels_with_value": len(out), "mode": "rows"}

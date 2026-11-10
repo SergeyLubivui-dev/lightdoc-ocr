@@ -296,7 +296,48 @@ class DriverLicenseBack(DocType):
         if expiry:
             F["licence_expiry"] = Field(expiry, round(min(0.95, 0.3 + 0.2 * sum(1 for r in out_rows if r["date_to"] == expiry)), 3), f"дата окончания, общая для {sum(1 for r in out_rows if r['date_to'] == expiry)} строк (колонка 11)", valid=True)
         self._number_and_14(F, lines, card, cell, paddle)
+        self._field14_extras(F, card, paddle); self._expired_flag(F)
         return ex
+
+    @staticmethod
+    def _field14_extras(F, card, paddle):
+        """Строка поля 14 («14. стаж с 1992г. ОЧКИ ИЛИ К.ЛИНЗЫ»): год начала стажа и ограничение (очки/линзы) — отдельными полями."""
+        if paddle is None or not hasattr(paddle, "recognize_crop"): return
+        H, W = card.shape[:2]; best = None
+        if "field_14" not in F:        # поле 14 не прочитано общим OCR (мелкая карточка) — отдельный проход Paddle по левой нижней части
+            try:
+                sub = card[int(0.55 * H):, :int(0.48 * W)]; sl = paddle(sub, merge=False)
+                for l in sl:
+                    y = re.fullmatch(r"\W*(?:14\W*)?\s*(19[5-9]\d|20[0-3]\d)\W*", l.text.strip())
+                    if y: F["field_14"] = Field(y.group(1), float(l.score) * 0.85, "поле 14 (год), отдельный проход по левой нижней части", valid=True); break
+            except Exception: pass
+        for y0, y1 in ((0.79, 0.885), (0.77, 0.9), (0.8, 0.87)):
+            crop = cv2.cvtColor(card[int(y0 * H):int(y1 * H), int(0.10 * W):int(0.62 * W)], cv2.COLOR_BGR2GRAY)
+            for sc in (2, 3):
+                try: t, cf = paddle.recognize_crop(cv2.cvtColor(cv2.resize(crop, None, fx=sc, fy=sc, interpolation=cv2.INTER_CUBIC), cv2.COLOR_GRAY2BGR))
+                except Exception: continue
+                tt = t.upper()
+                if re.search(r"СТАЖ|С\s*(19|20)\d\d", tt) and (best is None or cf > best[1]): best = (t, float(cf))
+        if not best: return
+        t, cf = best; tu = t.upper()
+        m = re.search(r"С\s*((?:19[5-9]|20[0-3])\d)", tu)
+        if m: F["experience_since"] = Field(int(m.group(1)), round(cf * 0.9, 3), f"поле 14: «{t.strip()}»", valid=True)
+        tail = tu[m.end():] if m else tu
+        tail = re.sub(r"^\W*Г\.?", "", tail).strip(" .,:;")
+        if tail and len(re.sub(r"\W", "", tail)) >= 3:
+            has_o, has_l = ("ОЧК" in tail or "ОЧИ" in tail), bool(re.search(r"ЛИН", tail))
+            norm = "Очки или контактные линзы" if (has_o and has_l) else ("Контактные линзы" if has_l else ("Очки" if has_o else None))
+            F["restrictions"] = Field(norm or tail.capitalize(), round(cf * (0.9 if norm else 0.5), 3), f"поле 14, исходный текст: «{tail}»", valid=bool(norm))
+
+    @staticmethod
+    def _expired_flag(F):
+        e = F.get("licence_expiry")
+        if e is not None and e.value:
+            try:
+                d, mth, y = (int(x) for x in e.value.split("."))
+                dt = date(y, mth, d); today = date.today()
+                F["expired"] = Field(bool(dt < today), e.confidence, f"срок действия до {e.value}; сегодня {today.strftime('%d.%m.%Y')}", valid=True)
+            except Exception: pass
 
     @staticmethod
     def _cols_from_ink(gray, grid, rows, x0, x1):
@@ -347,6 +388,20 @@ class DriverLicenseBack(DocType):
             if l.cy > 0.8 and l.cx > 0.4:
                 m = NUM_RE.search(l.text.replace("O", "0").replace("О", "0"))
                 if m and (best is None or l.score > best[1]): best = (f"{m.group(1)} {m.group(2)} {m.group(3)}", float(l.score))
+        if best is None and paddle is not None and hasattr(paddle, "recognize_crop"):    # красный номер: разность каналов R−G убирает розовый фон, строка читается как одна
+            votes = Counter(); sc_ = {}
+            for y0, y1 in ((0.83, 0.94), (0.81, 0.95), (0.84, 0.93)):
+                crop = card[int(y0 * H):int(y1 * H), int(0.42 * W):int(0.99 * W)]
+                bb, gg, rr = [crop[:, :, i].astype(np.float32) for i in range(3)]
+                red = np.clip(255 - np.clip((rr - gg) * 3.0, 0, 255), 0, 255).astype(np.uint8)
+                for sc in (2, 3):
+                    try: t, cf = paddle.recognize_crop(cv2.cvtColor(cv2.resize(red, None, fx=sc, fy=sc, interpolation=cv2.INTER_CUBIC), cv2.COLOR_GRAY2BGR))
+                    except Exception: continue
+                    m = NUM_RE.search(t.replace("O", "0").replace("О", "0"))
+                    if m:
+                        v = f"{m.group(1)} {m.group(2)} {m.group(3)}"; votes[v] += 1; sc_[v] = max(sc_.get(v, 0), float(cf))
+            if votes:
+                v, n = votes.most_common(1)[0]; best = (v, min(0.95, sc_[v] * (0.7 + 0.1 * min(3, n))))
         if best is None and cell is not None:     # перечитать красную полосу внизу справа
             crop = card[int(0.88 * H):, int(0.4 * W):]
             for mode in ("clahe", "sharp"):

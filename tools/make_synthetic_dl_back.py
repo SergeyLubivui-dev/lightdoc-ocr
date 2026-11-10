@@ -65,6 +65,6 @@ def gt():
 
 
 if __name__ == "__main__":
-    for i, (w, a, tl, q) in enumerate([(300, 2.0, 0.03, 85), (450, -3.0, 0.05, 80), (600, 1.0, 0.02, 80)], 1):
+    for i, (w, a, tl, q) in enumerate([(300, 2.0, 0.03, 85), (450, -3.0, 0.05, 80), (600, 1.0, 0.02, 80), (520, 2.0, 0.03, 78)], 1):
         c = card(i); dst = sheet(c, f"samples/synth_dlback{i}.jpg", w, a, tl, q=q, seed=i)
         g = gt(); g["corners_TL_TR_BR_BL"] = dst.tolist(); json.dump(g, open(f"samples/synth_dlback{i}.gt.json", "w"), ensure_ascii=False, indent=1)

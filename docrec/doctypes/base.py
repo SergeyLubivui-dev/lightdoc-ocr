@@ -40,6 +40,7 @@ class Extraction:
 class DocType:
     name: ClassVar[str] = "base"
     title_ru: ClassVar[str] = ""
+    card_size_hi: ClassVar = None   # (w, h) увеличенной карточки, если исходник достаточно крупный (слои по шрифту работают на ≥1000 px по ширине)
     card_size: ClassVar[tuple[int, int]] = (1026, 648)  # px нормализованной карточки (12 px/мм для ID-1)
     aspect: ClassVar[float] = 1026 / 648
     # (фраза, вес): нечёткий поиск по строкам OCR

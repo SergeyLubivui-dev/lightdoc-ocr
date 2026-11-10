@@ -497,8 +497,8 @@ def read_color(card: np.ndarray, V: np.ndarray, y_center: float, paddle, norm_co
         yc = y_center + 0.004 * k
         a, b = int(max(0, (yc - 0.012) * H)), int(min(H, (yc + 0.018) * H))
         if b - a < 8: continue
-        for img in (V, card):
-            crop = img[a:b, int(0.28 * W):int(0.75 * W)]
+        for img, x0 in ((V, 0.28), (card, 0.28), (card, 0.11), (V, 0.11)):    # значение «Цвет» начинается сразу за короткой подписью: окна и от 0.11 ширины
+            crop = img[a:b, int(x0 * W):int(0.75 * W)]
             for hh in (64, 96):
                 t, sc, cf = paddle.recognize_chars(_prep(crop, hh))
                 if not t.strip(): continue

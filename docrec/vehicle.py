@@ -113,7 +113,7 @@ def norm_power(raw: str):
 def norm_mass(raw: str):
     d = re.sub(r"[^0-9]", "", raw.translate(str.maketrans("OОoо", "0000")).replace("S", "5").replace("B", "8"))
     if not d: return None, False
-    return int(d), 100 <= int(d) <= 60000
+    return int(d), 100 <= int(d) <= 99999
 
 
 COLORS = ["белый", "чёрный", "серый", "серебристый", "синий", "голубой", "красный", "бордовый", "зелёный", "жёлтый", "оранжевый", "коричневый",
@@ -189,8 +189,21 @@ def norm_color_lex(raw: str):
     return v, ok, None
 
 
+def _eco_prefix(t: str):
+    """Значение у края/под бликом обрезано («НЕ УСТАНОВ…»): достраиваем до словарной формы, но помечаем как обрезанное."""
+    from .textutils import _lev, fold
+    f = fold(t.replace(" ", ""))
+    if len(f) < 6: return None
+    for full in ("не установлено", "не установлен"):
+        ff = fold(full.replace(" ", ""))
+        if len(f) < len(ff) and _lev(f, ff[:len(f)]) <= max(1, len(f) // 8): return full
+    return None
+
+
 def norm_eco_lex(raw: str):
     t = re.sub(r"[^А-Яа-яЁё ]", "", raw).strip()
+    pre = _eco_prefix(t)
+    if pre: return pre, True, "значение обрезано/закрыто бликом: достроено по словарю («не установлено»)"
     if len(t) >= 3:
         s = LX.snap(t.split()[0] if len(t.split()) == 1 else t, "sts/eco_class", thr=0.3)
         if s["status"] in ("exact", "snapped"): return s["value"].split("|")[0], True, LX.note_for(s, "экокласс")

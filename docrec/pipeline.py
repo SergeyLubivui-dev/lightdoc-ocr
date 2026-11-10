@@ -400,6 +400,8 @@ class DocumentPipeline:
         if doc_type != "unknown" and REGISTRY[doc_type].card_size != size:
             # тип требует другой формат (напр. разворот паспорта) — перевыпрямляем и перечитываем
             size = REGISTRY[doc_type].card_size
+            hi = getattr(REGISTRY[doc_type], "card_size_hi", None)
+            if hi and max(np.linalg.norm(quad[0] - quad[1]), np.linalg.norm(quad[0] - quad[3])) * 1.0 >= 1.3 * max(size) * 0.9: size = hi   # крупный исходник: не теряем разрешение (слои печати по шрифту)
             card = warp_card(img, quad, size)
             if rotation: card = cv2.rotate(card, cv2.ROTATE_180)
             t = time.perf_counter(); lines = self.ocr(card); T["ocr_retype"] = time.perf_counter() - t

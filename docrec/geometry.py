@@ -201,7 +201,7 @@ def warp_card(img: np.ndarray, quad: np.ndarray, size=(1026, 648)) -> np.ndarray
     return cv2.warpPerspective(img, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
 
-def small_card_crop(img: np.ndarray, max_ratio: float = 0.12, long_side: int = 1100):
+def small_card_crop(img: np.ndarray, max_ratio: float = 0.2, long_side: int = 1100):
     """Маленькая карточка посреди большого светлого листа (скан А4): находим единственный тёмный блок карточной формы, вырезаем с полями и увеличиваем
     (Lanczos + резкость) до long_side по длинной стороне. -> (crop, meta) | None."""
     h, w = img.shape[:2]

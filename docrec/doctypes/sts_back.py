@@ -85,7 +85,7 @@ def join_breaks(text: str):
 @register
 class STSBack(DocType):
     name = "sts_back"; title_ru = "Свидетельство о регистрации ТС (СТС), оборотная сторона"
-    card_size = (704, 1000); aspect = 1000 / 704
+    card_size = (704, 1000); aspect = 1000 / 704; card_size_hi = (1056, 1500)
     keywords = [("СОБСТВЕННИК (ВЛАДЕЛЕЦ)", 3), ("РЕСПУБЛИКА, КРАЙ, ОБЛАСТЬ", 2), ("НАС. ПУНКТ", 1), ("ОСОБЫЕ ОТМЕТКИ", 2), ("КОД ПОДРАЗДЕЛЕНИЯ ГИБДД", 2), ("УЛИЦА", 0.5)]
     implemented = True; hybrid_internal = True
     expected_fields = ["sts_number", "owner", "region", "district", "locality", "street", "house", "gibdd_code", "issue_date"]
@@ -96,6 +96,12 @@ class STSBack(DocType):
         L, V = split_ink(card)
         read = (lambda im: paddle(im, merge=False)) if paddle is not None else (lambda im: ocr(im) if ocr else lines)
         card_lines = read(card)
+        from .sts_back_b import is_layout_b, parse_layout_b
+        if paddle is not None and is_layout_b(card_lines):      # бланк нового образца (подписи «Субъект Российской Федерации», строки значений)
+            try:
+                if parse_layout_b(card, card_lines, paddle, F, ex): return ex
+            except Exception as e:
+                ex.extra["layout_b_error"] = repr(e)[:150]; F.clear()
         v_lines = read(V)
         found = anchors.locate_labels([l for l in card_lines if l.x0 < 0.4], SPECS, thr=0.6)
         pos = anchors.label_positions(SPECS, found)

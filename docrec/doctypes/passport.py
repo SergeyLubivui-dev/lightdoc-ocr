@@ -10,6 +10,7 @@ from ..ocr import Line
 from ..textutils import fold, partial_ratio, _lev, to_cyr, _L2C
 from .. import anchors, mrz as MRZ
 from .base import DocType, Extraction, Field, register
+from .. import lexicon as _LX
 
 CUES = [r"УФМС", r"\bМВД\b", r"ПАСПОРТ\s*ВЫДАН", r"ДАТА\s*ВЫДАЧИ", r"КОД\s*ПОДРАЗДЕЛЕНИЯ", r"ЛИЧНЫЙ\s*КОД", r"ФАМИЛИЯ", r"ДАТА\s*РОЖДЕНИЯ", r"МЕСТО\s*РОЖДЕНИЯ",
         r"ФЕДЕРАЦИЯ", r"РОССИЙСКАЯ", r"PNRUS", r"\b(?:МУЖ|ЖЕН)\.?\b", r"\b\d{3}\s*[-–—]\s*\d{3}\b", r"<<<"]
@@ -65,8 +66,20 @@ DATE_RE = re.compile(r"(?<!\d)(\d{2})\s*[.,:;\-/*·]\s*(\d{2})\s*[.,:;\-/*·]\s*
 CODE_RE = re.compile(r"(?<!\d)(\d{3})\s*[-–—.]\s*(\d{3})(?!\d)")
 
 
+# потерянная точка: «1102.1987», «11.021987», «11021987» (в паспорте допустимы только даты, прошедшие проверку календаря)
+DATE_LENIENT = [re.compile(r"(?<!\d)(\d{2})(\d{2})\s*[.,:;\-/*·]\s*(\d{4})(?!\d)"), re.compile(r"(?<!\d)(\d{2})\s*[.,:;\-/*·]\s*(\d{2})(\d{4})(?!\d)"),
+                re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{4})(?!\d)")]
+
+
 def find_dates(text: str):
-    return [(f"{a}.{b}.{c}", m.start()) for m in DATE_RE.finditer(text) for a, b, c in [m.groups()]]
+    out = [(f"{a}.{b}.{c}", m.start()) for m in DATE_RE.finditer(text) for a, b, c in [m.groups()]]
+    if not out:
+        for rx in DATE_LENIENT:
+            for m in rx.finditer(text):
+                d = f"{m.group(1)}.{m.group(2)}.{m.group(3)}"
+                if valid_date(d, 1850): out.append((d, m.start()))
+            if out: break
+    return out
 
 
 def valid_date(s: str, lo=1890, hi=None):
@@ -160,6 +173,120 @@ def sim(a: str, b: str) -> float:
     return 1 - _lev(a, b) / max(len(a), len(b))
 
 
+def _vote_crop(pipe, crop):
+    """Чтение кропа строки в разных масштабах/обработках -> {текст: суммарная уверенность}."""
+    from collections import defaultdict
+    from ..makemodel import _enhance, _prep
+    votes = defaultdict(float)
+    if crop.shape[0] < 8 or crop.shape[1] < 8: return votes
+    for mode in ("raw", "clahe", "sharp", "gamma"):
+        c = _enhance(crop, mode)
+        for h_ in (64, 96, 128):
+            t, sc, _cf = pipe.paddle.recognize_chars(_prep(c, h_))
+            tt = re.sub(r"[^А-ЯЁA-Z\- ]", "", to_cyr(t.upper()) if t else "").strip()
+            if len(tt) >= 3 and sc >= 0.35: votes[tt] += sc
+    return votes
+
+
+def _rescue_surname(pipe, m, F_lines):
+    """Строку фамилии детектор не нашёл (размытая копия): читаем кроп по расчётной позиции над «Имя»: шаг строк — как между именем и отчеством."""
+    H, W = m.shape[:2]
+    ln = F_lines["name"]; sp = (F_lines["patronymic"].cy - ln.cy) if "patronymic" in F_lines else 0.03
+    sp = min(max(sp, 0.025), 0.045)
+    best = None
+    for k in (2.0, 1.8, 2.2, 1.6, 1.0):     # между фамилией и именем промежуток больше, чем между именем и отчеством (подписи)
+        cy = ln.cy - k * sp
+        y0, y1 = int(max(0, (cy - 0.017) * H)), int(min(H, (cy + 0.017) * H))
+        x0, x1 = int(max(0, (ln.x0 - 0.03) * W)), int(min(W, (ln.x1 + 0.10) * W))
+        votes = _vote_crop(pipe, m[y0:y1, x0:x1])
+        for t, w in votes.items():
+            if len(re.sub(r"[^А-ЯЁ]", "", t)) >= 4 and not re.search(r"ФАМИЛ|ИМЯ|ОТЧЕСТВ", t) and (best is None or w > best[1]): best = (t, w, votes)
+    return best
+
+
+def _reread_alts(pipe, m, line, text):
+    """Варианты чтения слабой строки значения: кроп с разным отступом/масштабом/обработкой -> голосование. -> dict(value, note, factor) или None.
+    Значение меняем, только если другой вариант явно лидирует (≥1.5× вес исходного); иначе оставляем и перечисляем альтернативы."""
+    from collections import defaultdict
+    from ..makemodel import _enhance, _prep
+    H, W = m.shape[:2]
+    votes = defaultdict(float); base = re.sub(r"[^А-ЯЁA-Z\- ]", "", text.upper()).strip()
+    cy = (line.y0 + line.y1) / 2; hh = max(line.y1 - line.y0, 0.012)
+    for padk in (0.15, 0.35):
+        y0, y1 = int(max(0, (cy - hh / 2 - padk * hh) * H)), int(min(H, (cy + hh / 2 + padk * hh) * H))
+        x0, x1 = int(max(0, (line.x0 - 0.02) * W)), int(min(W, (line.x1 + 0.02) * W))
+        crop = m[y0:y1, x0:x1]
+        if crop.shape[0] < 8 or crop.shape[1] < 8: continue
+        for mode in ("raw", "clahe", "sharp", "gamma"):
+            c = _enhance(crop, mode)
+            for h_ in (64, 96, 128):
+                t, sc, _cf = pipe.paddle.recognize_chars(_prep(c, h_))
+                tt = re.sub(r"[^А-ЯЁA-Z\- ]", "", to_cyr(t.upper()) if t else "").strip()
+                if len(tt) >= 3 and sc >= 0.35: votes[tt] += sc
+    if not votes or len(votes) == 1 and base in votes: return None
+    votes[base] += line.score
+    ranked = sorted(votes.items(), key=lambda x: -x[1]); top, wtop = ranked[0]
+    note = "варианты чтения: " + ", ".join(f"«{v}» ({w:.1f})" for v, w in ranked[:4])
+    if top != base and wtop >= 1.5 * votes[base]: return dict(value=top, note=note + f"; выбрано «{top}» вместо «{base}»", factor=0.95)
+    return dict(value=text, note=note + " (оставлено исходное)" if len(ranked) > 1 else None, factor=0.95) if len(ranked) > 1 else None
+
+
+def _lexicon_pass(F, checks):
+    """Привязка к публичным лексиконам (docrec/lexicons): имена/отчества/места/орган выдачи. Поля, подтверждённые МРЗ, не трогаем.
+    Фамилии НЕ подгоняем (редкие/нестандартные фамилии): только повышаем уверенность, если фамилия есть в словаре, иначе — пометка «возможно …»."""
+    from .. import lexicon as LX
+    def mrz_ok(k): return checks.get(k) in ("agree", "corrected")
+    for key, lex in (("name", "shared/first_names"), ("patronymic", "shared/patronymics")):
+        f = F.get(key)
+        if f is None or not f.value or mrz_ok(key) or (f.note or "").startswith("из МРЗ"): continue
+        words = str(f.value).split(); new = []; ch = []
+        for w in words:
+            parts = w.split("-"); np_ = []
+            for part in parts:
+                if len(part) < 3 or part in LX.get(lex): np_.append(part); continue
+                sn = LX.snap(part, lex, thr=0.1 if lex.endswith("first_names") else 0.12)
+                if sn["status"] == "snapped": np_.append(sn["value"].upper()); ch.append((part, sn["value"].upper(), sn["norm"]))
+                else: np_.append(part)
+            new.append("-".join(np_))
+        if ch:
+            raw = f.value; f.value = " ".join(new); f.confidence = float(f.confidence) * 0.95
+            f.note = ((f.note + "; ") if f.note else "") + "лексикон: " + ", ".join(f"«{a}» → «{b}» (расстояние {n})" for a, b, n in ch) + f"; печать читалась «{raw}»"
+    f = F.get("surname")
+    if f is not None and f.value and not mrz_ok("surname") and not (f.note or "").startswith("из МРЗ"):
+        words = [w for w in re.split(r"[\s-]+", str(f.value)) if len(w) >= 3]
+        if words and all(w in LX.get("shared/surnames") for w in words): f.confidence = min(1.0, float(f.confidence) + 0.03)
+        elif words:
+            alts = []
+            for w in words:
+                if w in LX.get("shared/surnames"): continue
+                sn = LX.snap(w, "shared/surnames", thr=0.12)
+                if sn["status"] in ("snapped", "ambiguous") and sn["alts"]: alts.append((w, sn["alts"][0][0], sn["alts"][0][1]))
+            if alts:
+                f.note = ((f.note + "; ") if f.note else "") + "лексикон: фамилии нет в словаре, возможна путаница букв — " + ", ".join(f"«{a}» ≈ «{b}» ({n})" for a, b, n in alts) + " (не исправлено)"
+                f.confidence = float(f.confidence) * 0.95
+    f = F.get("issued_by")
+    if f is not None and f.value:
+        f.value = re.sub(r"\bГОР[-–—]\s*(?=[А-ЯЁ])", "ГОР. ", str(f.value))     # «ГОР- ТВЕРИ» -> «ГОР. ТВЕРИ»
+        txt, ch = LX.snap_multi(str(f.value), [("passport/issuer_places", 0.07, 7), ("passport/issuer_words", 0.15, 4)])
+        if ch:
+            raw = f.value; f.value = txt; f.confidence = float(f.confidence) * 0.97
+            f.note = ((f.note + "; ") if f.note else "") + "лексикон: " + ", ".join(f"«{a}» → «{b}» (расстояние {n})" for a, b, n in ch)
+    f = F.get("birth_place")
+    if f is not None and f.value:
+        txt, ch = LX.snap_multi(str(f.value), [("shared/place_words", 0.15, 4), ("shared/months", 0.0, 99)], min_len=4)   # закрытые слова («ОБЛАСТЬ», «ГОР.») — поправляем
+        if ch:
+            f.value = txt; f.confidence = float(f.confidence) * 0.98
+            f.note = ((f.note + "; ") if f.note else "") + "лексикон: " + ", ".join(f"«{a}» → «{b}» (расстояние {n})" for a, b, n in ch)
+        # названия мест — открытое множество (села/посёлки в словаре отсутствуют): не подменяем, только подсказываем близкую запись
+        hints = []
+        for tok in re.split(r"[\s.,]+", str(f.value)):
+            if len(tok) < 6 or any(tok in LX.get(n) for n in ("shared/cities", "passport/issuer_places", "shared/place_words", "shared/regions", "shared/ussr_countries")): continue
+            sn = LX.snap(tok, "shared/cities", thr=0.12)
+            if sn["status"] in ("snapped", "ambiguous") and sn["alts"]: hints.append(f"«{tok}» ≈ «{sn['alts'][0][0]}» ({sn['alts'][0][1]})")
+        if hints:
+            f.note = ((f.note + "; ") if f.note else "") + "лексикон: названия нет в словаре, возможна путаница букв — " + ", ".join(hints) + " (не исправлено)"; f.confidence = float(f.confidence) * 0.97
+
+
 def read_passport(pipe, img: np.ndarray) -> dict | None:
     """-> {fields, extra, image(выровненный кадр), photo_box, lines} или None, если это не паспорт."""
     H0, W0 = img.shape[:2]
@@ -192,6 +319,10 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
     split = 0.5
     ys = [v[0].cy for v in lab_lower.values()] if lab_lower else []
     if ys: split = max(0.40, min(0.55, min(ys) - 0.05))
+    else:   # подписи нижней страницы не прочитаны (мелкий шрифт/ксерокс): граница — ниже последней отметки верхней страницы (дата, код, «Личный код», «М.П.», подпись)
+        ups = [l.cy for l in flat if l.cy < 0.42 and (DATE_RE.search(l.text) or CODE_RE.search(l.text) or re.search(r"ЛИЧН|М\.?\s*П\.?|ПОДПИСЬ|КОД\s*ПОДР", l.text.upper()))]
+        if ups: split = max(0.40, min(0.50, max(ups) + 0.07))
+    notes["page_split"] = round(float(split), 3)
     mrz_lines = mrz_candidates(lines)
     mrz_y = min([l.cy for l in lines if l.cy > 0.78 and (l.text.count("<") >= 2 or "RUS" in l.text.upper())], default=1.0)
     # ---------- МРЗ
@@ -246,7 +377,7 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
         w = clean_cyr(tt).replace(".", "")
         for tok in w.split():
             for k in SEX:
-                if _lev(fold(tok), fold(k)) <= 1 and len(tok) >= 3 and not (len(tok) > 4):
+                if (_lev(fold(tok), fold(k)) <= 1 or _LX.wdist(_LX.fold(tok), _LX.fold(k), 1.2) <= 1.05) and len(tok) >= 3 and not (len(tok) > 4):
                     sexl = sexl or (SEX[k], l)
     names, place = [], []
     row_y = bd[1].cy if bd else (sexl[1].cy if sexl else None)
@@ -254,8 +385,11 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
         if (bd and l is bd[1]) or (sexl and l is sexl[1]): 
             if l is not (bd[1] if bd else None) or sexl is None or l is not sexl[1]:
                 pass
-        t = clean_cyr(DATE_RE.sub(" ", tt))
-        w = [x for x in t.split() if not (sexl and _lev(fold(x), fold(sexl[0].strip(".")))<=1 and len(x) <= 4)]
+        t = DATE_RE.sub(" ", tt)
+        for _rx in DATE_LENIENT:
+            t = _rx.sub(lambda m_: " " if valid_date(f"{m_.group(1)}.{m_.group(2)}.{m_.group(3)}", 1850) else m_.group(0), t)
+        t = clean_cyr(t)
+        w = [x for x in t.split() if not (sexl and len(x) <= 4 and (_lev(fold(x), fold(sexl[0].strip(".")))<=1 or _LX.wdist(_LX.fold(x), _LX.fold(sexl[0].strip(".")), 1.2) <= 1.05))]
         t = " ".join(w)
         if not re.search(r"[А-ЯЁA-Z]{3}", t) or upper_frac(l.text) < 0.55 and not re.search(r"[А-ЯЁ]{3}", t): continue
         if row_y is not None and l.cy < row_y - 0.012: names.append((t, l))
@@ -275,8 +409,22 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
         sl = dict(zip(("name", "patronymic") if PAT.search(names[-1][0].split()[-1]) else ("surname", "name"), names))   # одна из трёх потеряна/размыта — заполним из МРЗ
     elif len(names) == 1:
         sl = {"patronymic" if PAT.search(names[0][0].split()[-1]) else "surname": names[0]}
+    if "surname" not in sl and "name" in sl and pipe is not None and not (mz and mz.get("surname")):
+        try:
+            rs = _rescue_surname(pipe, m, {k: v[1] for k, v in sl.items()})
+            if rs:
+                top, w, votes = rs; tot = sum(votes.values())
+                F["surname"] = Field(top, 0.45, "перечитано кропом по расчётной позиции (строку не нашёл детектор): варианты " + ", ".join(f"«{a}» ({b:.1f})" for a, b in sorted(votes.items(), key=lambda x: -x[1])[:4]))
+        except Exception:
+            pass
     for k, (t, l) in sl.items():
         F[k] = Field(t, l.score, "printed")
+        if l.score < 0.75 and pipe is not None:      # размытая строка: перечитываем в разных масштабах/обработках, смотрим на согласие вариантов
+            try:
+                alt = _reread_alts(pipe, m, l, t)
+                if alt: F[k].note = "printed; " + alt["note"]; F[k].confidence = float(F[k].confidence) * alt["factor"]; F[k].value = alt["value"]
+            except Exception:
+                pass
     if place:
         place.sort(key=lambda p: p[1].cy)
         txt = clean_cyr(" ".join(t for t, _ in place))
@@ -311,6 +459,11 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
             if same and kind != "exact" and len(a) == len(b) and a != b and base_conf >= 0.9 and sim(a, b) >= 0.7:
                 # те же длины, различия только в «похожих» буквах -> побуквенно берём МРЗ (контрольные суммы МРЗ сошлись)
                 conf_pairs = {frozenset(x) for x in ("БВ", "НП", "ИЙ", "ИН", "ШЩ", "ЗЭ", "ЕЁ", "ХЖ", "ОЮ", "СЕ", "ГТ", "ЛД", "ЬЫ", "УЧ", "АЯ", "ЕВ", "РВ", "ИЛ", "ГП")}
+                if key in ("name", "patronymic", "surname"):
+                    from .. import lexicon as LX
+                    lx = {"name": "shared/first_names", "patronymic": "shared/patronymics", "surname": "shared/surnames"}[key]
+                    if a in LX.get(lx) and b not in LX.get(lx):    # в МРЗ вариант вне словаря (В/Б, Н/П неоднозначны при транслитерации), печатный — словарный
+                        cur.note = f"печать ('{a}') есть в словаре, вариант МРЗ ('{b}') — нет: оставлена печать"; cur.confidence = max(cur.confidence, 0.85); checks[key] = "agree"; return
                 diff = [(x, y) for x, y in zip(a, b) if x != y]
                 if all(frozenset((x, y)) in conf_pairs for x, y in diff):
                     cur.note = f"исправлено по МРЗ (печать читалась как '{a}')"; cur.value = b; cur.confidence = 0.9; checks[key] = "corrected"; return
@@ -334,6 +487,7 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
         if mz.get("number") and sn:
             ok = sn["number"] == mz["number"] and (not sn.get("series") or sn["series"][:2] == mz["series3"][:2] and sn["series"].replace(" ", "")[:3] == mz["series3"])
             checks["series_number"] = "agree" if ok else f"MISMATCH strips={sn.get('series')} {sn['number']} mrz={mz.get('series3')}x {mz['number']}"
+    _lexicon_pass(F, checks)
     # серия/номер: итог
     if sn:
         conf = sn["score"] * (1.0 if sn.get("agree") else 0.85)

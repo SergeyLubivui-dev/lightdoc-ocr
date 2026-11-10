@@ -453,6 +453,13 @@ class DriverLicenseRF(DocType):
                 if ch:
                     F[la_k].note = f"было '{F[la_k].value}', исправлено по транслитерации «{F[ru_k].value}»"
                     F[la_k].value = new
+        from .. import lexicon as LX
+        for k in ("birth_place", "region"):   # места/регионы: пословная привязка к публичным лексиконам (строго, известные слова не трогаем)
+            if k in F and isinstance(F[k].value, str) and F[k].value:
+                txt_, ch_ = LX.snap_multi(F[k].value, [("shared/cities", 0.1, 6), ("passport/issuer_places", 0.1, 6)], min_len=5)
+                if ch_:
+                    F[k].note = ((F[k].note + "; ") if F[k].note else "") + "лексикон: " + ", ".join(f"«{a}» → «{b}» (расстояние {n})" for a, b, n in ch_)
+                    F[k].value = txt_; F[k].confidence *= 0.97
         for k in ("birth_date", "issue_date", "expiry_date"):
             if k in F: F[k].valid = parse_date(F[k].value) is not None
         if all(k in F for k in ("birth_date", "issue_date", "expiry_date")):

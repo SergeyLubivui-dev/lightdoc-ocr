@@ -114,6 +114,13 @@ class STSBack(DocType):
                     parts = v.split(" ", 1)
                     if len(parts) == 2: v = parts[0] + " " + parts[1][:1].upper() + parts[1][1:]
                 F[k].value = v
+        if "region" in F and isinstance(F["region"].value, str) and len(F["region"].value) >= 5:   # субъект РФ — по лексикону (фраза целиком)
+            from .. import lexicon as LX
+            sn = LX.snap(F["region"].value, "sts_back/regions", thr=0.2)
+            if sn["status"] == "snapped":
+                F["region"].note = ((F["region"].note + "; ") if F["region"].note else "") + LX.note_for(sn, "регион"); F["region"].value = sn["value"]
+            elif sn["status"] == "ambiguous":
+                F["region"].note = ((F["region"].note + "; ") if F["region"].note else "") + LX.note_for(sn, "регион"); F["region"].confidence *= 0.9
         for k, pat in PRE.items():
             if k in F:
                 F[k].valid = bool(re.search(pat, F[k].value, re.I))

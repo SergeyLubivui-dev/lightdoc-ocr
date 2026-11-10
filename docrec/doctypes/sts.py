@@ -2,18 +2,22 @@
 значения печатаются бледным шрифтом поверх/между подписями и обычно смещены относительно них — поэтому слои печати разделяются (ink.py)."""
 from __future__ import annotations
 import re
+import cv2
 import numpy as np
 from ..ocr import Line
 from ..textutils import fold
 from .. import anchors, vehicle as V
 from ..ink import split_ink
 from .. import makemodel as MM
+from ..textutils import partial_ratio
+import copy
+from ..glare import glare_mask, flag_fields
 from .base import DocType, Extraction, Field, register
 
 SPECS = [
     anchors.LabelSpec("plate", ["Регистрационный знак"]),
     anchors.LabelSpec("vin", ["Идентификационный номер (VIN)"]),
-    anchors.LabelSpec("make_model", ["Марка, модель"], multi=2),
+    anchors.LabelSpec("make_model", ["Марка, модель", "Марка"], multi=2),
     anchors.LabelSpec("vehicle_type", ["Тип ТС"]),
     anchors.LabelSpec("category", ["Категория ТС (ABCD, прицеп)"]),
     anchors.LabelSpec("year", ["Год выпуска ТС"]),
@@ -68,7 +72,7 @@ NORMALIZERS = {
     "plate": lambda t: (lambda r: (r[0], r[1], r[2]))(V.norm_plate(t)),
     "vin": V.norm_vin,
     "vehicle_type": V.norm_vehicle_type_lex,
-    "category": lambda t: (lambda r: ((f"{r[0]['category'] or ''}/{r[0]['class'] or ''}".strip("/") if r[0] else None), r[1], None))(V.norm_category(t)),
+    "category": lambda t: (lambda r: ((("Прицеп/" if re.search(r"ПРИЦЕП", t.upper()) and not r[0]["category"] else "") + f"{r[0]['category'] or ''}/{r[0]['class'] or ''}".strip("/") if r[0] else None), r[1], None))(V.norm_category(t)),
     "year": lambda t: (*V.norm_year(t), None),
     "chassis": lambda t: (*_norm_ident(t), None),
     "body": lambda t: (*_norm_ident(t), None),
@@ -200,7 +204,7 @@ class STS(DocType):
         # 4b) марка/модель: две плотные строки (кириллица + латиница) — отдельный разрез, перечитывание и сверка строк (makemodel.py)
         if paddle is not None:
             try:
-                _yl = pos[[s_.key for s_ in SPECS].index("make_model")][0]; ex.extra["make_model_ylab"] = round(float(_yl), 4); mm = MM.read_make_model(card, Vimg, _yl, paddle, cell)
+                _yl = pos[[s_.key for s_ in SPECS].index("make_model")][0]; _yl = self._sep_labels_y(list(lines) + list(llines), _yl, ex, card, paddle); ex.extra["make_model_ylab"] = round(float(_yl), 4); mm = MM.read_make_model(card, Vimg, _yl, paddle, cell)
             except Exception as e:   # не должно ронять весь СТС
                 mm = None; ex.extra["make_model_error"] = repr(e)[:120]
             if mm and mm["combined"] and (mm["valid"] or "make_model" not in F or mm["conf"] > F["make_model"].confidence):
@@ -215,24 +219,57 @@ class STS(DocType):
         pool = list(lines) + llines + (tv or [])
         self._pts_and_number(F, pool, llines, cands_all, paddle, Vimg, H)
         ex.extra["checks"] = {"used_paddle": used_paddle, "sequence": engines[-1][1] if engines else None}
+        try:
+            gm, gf = glare_mask(card)
+            if gf > 0: flag_fields(F, SPECS, pos, gm, ex)
+        except Exception as e:
+            ex.extra["glare_error"] = repr(e)[:100]
         return ex
+
+    @staticmethod
+    def _sep_labels_y(ls, y_default, ex, card=None, paddle=None):
+        """Бланк с отдельными подписями «Марка» и «Модель» (в каждой строке значения — марка и модель целиком, кириллица потом латиница):
+        якорь блока — подпись «Марка» (она выше), а не ближайшая к найденной «Модель»."""
+        def find(word):
+            c = [l for l in ls if l.x0 < 0.3 and len(re.sub(r"\W", "", l.text)) <= len(word) + 2 and partial_ratio(word, l.text) > 0.85]
+            return min(c, key=lambda l: abs(l.cy - y_default)) if c else None
+        a, b = find("Марка"), find("Модель")
+        if not (a and b) and card is not None and paddle is not None:   # подписи мелкие — перечитываем узкую полосу слева
+            Hh, Ww = card.shape[:2]
+            y0, y1 = int(max(0, y_default - 0.07) * Hh), int(min(1, y_default + 0.04) * Hh)
+            crop = cv2.resize(card[y0:y1, :int(0.36 * Ww)], None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+            pad = max(0, 300 - crop.shape[0])
+            if pad: crop = np.vstack([crop, np.full((pad, crop.shape[1], 3), 255, crop.dtype)])
+            try: sub = paddle(crop, merge=False)
+            except Exception: sub = []
+            ls = []
+            for l in sub:
+                ll = copy.copy(l); sc = crop.shape[0] / 2
+                ll.y0 = (y0 + l.y0 * sc) / Hh; ll.y1 = (y0 + l.y1 * sc) / Hh; ll.x0 = l.x0 * 0.36; ll.x1 = l.x1 * 0.36; ll.cy = (ll.y0 + ll.y1) / 2; ll.cx = (ll.x0 + ll.x1) / 2
+                ls.append(ll)
+            a, b = find("Марка"), find("Модель")
+        if a and b and 0 < b.cy - a.cy < 0.06 and abs(y_default - b.cy) < 0.03:
+            ex.extra["make_model_layout"] = "separate_labels"; return a.cy
+        return y_default
 
     def _pts_and_number(self, F, pool, llines, cands_all, paddle, Vimg, H):
         # ПТС: строка внизу, «ПТС: 77АА123456»
         cands = []
         for l in pool:
-            if l.cy < 0.74: continue
+            if l.cy < 0.74 or l.cy > 0.86: continue   # ниже — красный номер СТС, он не ПТС
             t = l.text
-            m = re.search(r"[:\-–]\s*([0-9A-Za-zА-Яа-я\s]{9,14})$", t) or re.search(r"([0-9]{2}\s?[0-9A-Za-zА-Яа-я]{2}\s?[0-9]{6})", t)
+            if len(re.findall(r"\d", t)) >= 12 and not re.search(r"(?<!\d)\d{15}(?!\d)", t.replace(" ", "")): continue   # похоже на ЭПТС, но цифры потеряны — перечитаем
+            m = re.search(r"(?<!\d)(\d{15})(?!\d)", t.replace(" ", ""))
+            m = m or re.search(r"[:\-–]\s*([0-9A-Za-zА-Яа-я\s]{9,14})$", t) or re.search(r"([0-9]{2}\s?[0-9A-Za-zА-Яа-я]{2}\s?[0-9]{6})", t)
             if m:
                 v, ok = V.norm_pts(m.group(1))
-                if v: cands.append((ok, l.score, v))
+                if v: cands.append((ok, l.score + (0.5 if re.search(r"ПТС|ПТ[СC]", t.upper()) else 0), v))
         if not any(c[0] for c in cands) and paddle is not None:
             band = Vimg[int(0.80 * H):int(0.90 * H)]
             pad = max(0, int(0.5 * band.shape[1]) - band.shape[0])   # тонкие полосы раздувают RAM детектора (апскейл) — дополняем белым
             if pad: band = np.vstack([band, np.full((pad, band.shape[1], 3), 255, band.dtype)])
             for l in _usable_lines(paddle(band)):
-                m = re.search(r"([0-9]{2}\s?[0-9A-Za-zА-Яа-я]{2}\s?[0-9]{6})", l.text)
+                m = re.search(r"(?<!\d)(\d{15})(?!\d)", l.text.replace(" ", "")) or re.search(r"([0-9]{2}\s?[0-9A-Za-zА-Яа-я]{2}\s?[0-9]{6})", l.text)
                 if m:
                     v, ok = V.norm_pts(m.group(1))
                     if v: cands.append((ok, l.score, v))

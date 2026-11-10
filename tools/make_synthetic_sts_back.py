@@ -7,11 +7,11 @@ from PIL import Image, ImageDraw, ImageFont
 import make_synthetic_sts as MS
 from make_synthetic_sts import scene, FB, FR, FM
 W, H = 880, 1250
-GT = {"owner": 'ООО"Ромашка"', "owner_lat": 'OOO"ROMASHKA"', "region": "Тверская область", "district": "р-н Кимрский", "locality": "г Кимры", "street": "ул Садовая",
+GT = {"owner": 'ООО"Ромашка"', "owner_lat": 'OOO"ROMASHKA"', "owner_type": "legal_entity", "region": "Тверская область", "district": "р-н Кимрский", "locality": "г Кимры", "street": "ул Садовая",
       "house": "12", "building": "", "apartment": "", "special_marks": "", "gibdd_code": "1123456", "issue_date": "2020-05-15", "sts_number": "77 30 123456"}
 
 
-def card_image(seed=0, shift=0.012):
+def card_image(seed=0, shift=0.012, marks=None):
     rng = np.random.default_rng(seed)
     bg = np.zeros((H, W, 3), np.float32) + (236, 228, 238)
     bg += cv2.resize(rng.normal(0, 4, (H // 40, W // 40, 3)).astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC)
@@ -28,6 +28,7 @@ def card_image(seed=0, shift=0.012):
     txt(W * .07, H * .609 - 14, "Дом", 22, SER, (45, 40, 50)); txt(W * .27, H * .609 - 8, "12", 22, FM, pale)
     txt(W * .34, H * .609 - 14, "корп.", 22, SER, (45, 40, 50)); txt(W * .58, H * .609 - 14, "кв.", 22, SER, (45, 40, 50))
     txt(W * .07, H * .645 - 14, "Особые отметки", 22, SER, (45, 40, 50))
+    for k, ln in enumerate(marks or []): txt(W * .34, H * (.645 + shift + 0.032 * k) - 8, ln, 22, FM, pale)
     txt(W * .76, H * .808, "1123456", 24, FM, (130, 115, 110))
     d.line((W * .76, H * .823, W * .95, H * .823), fill=(90, 90, 100), width=2)
     txt(W * .07, H * .855 - 14, "Код подразделения ГИБДД", 22, SER, (45, 40, 50))
@@ -41,3 +42,6 @@ if __name__ == "__main__":
     MS.GT_OVERRIDE = GT
     scene(card_image(0, 0.012), "samples/synth_sts_back1.jpg", angle=5, seed=3)
     scene(card_image(1, 0.018), "samples/synth_sts_back2.jpg", angle=-8, tilt=0.08, scale=0.58, seed=4)
+    # особые отметки в две строки с переносом слова без дефиса («СОБСТВЕН / НИК»)
+    g3 = dict(GT); g3["special_marks"] = "СПЕЦИАЛИЗИРОВАННЫЙ РЕФРИЖЕРАТОР, СОБСТВЕННИК ЮЛ. ТВЕРСКОЙ Р-Н"
+    scene(card_image(2, 0.014, marks=["СПЕЦИАЛИЗИРОВАННЫЙ РЕФРИЖЕРАТОР, СОБСТВЕН", "НИК ЮЛ. ТВЕРСКОЙ Р-Н"]), "samples/synth_sts_back3.jpg", angle=3, seed=5, gt=g3)

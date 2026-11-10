@@ -10,6 +10,8 @@ from ..ocr import Line
 from ..textutils import fold, partial_ratio, _lev, to_cyr
 from .. import anchors
 from ..ink import split_ink
+from .. import lexicon as LX
+from ..glare import glare_mask, flag_fields
 from .base import DocType, Extraction, Field, register
 
 SPECS = [anchors.LabelSpec("owner", ["Собственник (владелец)"], multi=2), anchors.LabelSpec("region", ["Республика, край, область"]),
@@ -32,7 +34,7 @@ def _clean(t: str) -> str:
 
 def _ru(t: str) -> str:
     t = _clean(t)
-    t = re.sub(r'^[0OО]{3}(?=\s*")', "ООО", t) if re.search(r"[А-Яа-я]{3}", t) else re.sub(r'^[0О]{3}(?=\s*")', "OOO", t)
+    t = re.sub(r'^[0OОоo]{3}(?=\s*")', "ООО", t) if re.search(r"[А-Яа-я]{3}", t) else re.sub(r'^[0О]{3}(?=\s*")', "OOO", t)
     t = re.sub(r'"\s*([^"]*?)\s*"', r'"\1"', t)
     t = re.sub(r'^(ООО|ОАО|ЗАО|ПАО|АО|OOO|OAO|ZAO|PAO)\s+"', r'\1"', t)
     return to_cyr(t) if re.search(r"[А-Яа-я]{3}", t) else t
@@ -52,6 +54,32 @@ def _month(tokens: list[str]):
             r = 1 - _lev(f, fold(mname)) / max(len(f), len(mname))
             if r > best[0]: best = (r, i + 1)
     return best[1] if best[0] >= 0.66 else None, best[0]
+
+
+_LEGAL = re.compile(r"^(ООО|ОАО|ЗАО|ПАО|АО|НАО|АНО|НКО|ГУП|МУП|ФГУП|МБУ|ГБУ|ФГБУ|ГКУ|МКУ|ТСЖ|СНТ|ПК|КФХ|ОГУП|ГУ|МУ|OOO|OAO|ZAO|PAO|LLC|JSC)\b", re.I)
+
+
+def owner_type(text: str):
+    """-> ('legal_entity'|'sole_proprietor'|'individual'|'unknown', note). Юрлицо: ООО/АО/… (в т.ч. «ООО"ИМЯ"» слитно); ИП; иначе ФИО."""
+    t = re.sub(r"\s+", " ", (text or "").strip().replace("0", "О") if re.match(r"^[0О]{3}", text or "") else (text or "").strip())
+    if re.match(r"^(ИП|IP)\b", t, re.I) or re.match(r"^ИНДИВИДУАЛЬНЫЙ ПРЕДПРИНИМАТЕЛЬ", t, re.I): return "sole_proprietor", "ИП"
+    if _LEGAL.match(t) or re.search(r'["«»“”]', t) and re.search(r"[А-ЯA-Z]{2,}", t) and len(t.split()) <= 4: return "legal_entity", "организационно-правовая форма/кавычки в наименовании"
+    if len(t.split()) >= 2: return "individual", "ФИО"
+    return "unknown", None
+
+
+def join_breaks(text: str):
+    """Склейка переноса слова без дефиса между строками/токенами: «СОБСТВЕН НИК» -> «СОБСТВЕННИК», только если склейка есть в словаре отметок,
+    а ни одна из частей сама словом не является. -> (text, [склейки])."""
+    lex = LX.get("sts_back/marks_words")
+    toks = text.split(); out = []; joins = []; i = 0
+    while i < len(toks):
+        if i + 1 < len(toks):
+            a, b = toks[i], toks[i + 1]; ab = (a + b).upper().strip(".,")
+            if ab in lex and a.strip(".,") not in lex and b.strip(".,") not in lex and len(a) >= 3 and len(b) >= 2:
+                out.append(a + b); joins.append(f"{a} {b} → {a + b}"); i += 2; continue
+        out.append(toks[i]); i += 1
+    return " ".join(out), joins
 
 
 @register
@@ -89,6 +117,7 @@ class STSBack(DocType):
         def put(key, ls, joiner=" "):
             if not ls: return None
             txt = _ru(joiner.join(l.text for l in sorted(ls, key=lambda l: (l.cy, l.x0))))
+            if key in ("locality", "street"): txt = re.sub(r"^(г|с|д|п|х|ст|ул|пер|пр|ш|пос)(?=[А-ЯЁ][а-яё])", r"\1 ", txt)
             if txt: F[key] = Field(txt, float(np.mean([l.score for l in ls])), None, valid=None)
             return txt
         own = assign.get("owner", [])
@@ -97,6 +126,9 @@ class STSBack(DocType):
             if ru: put("owner", ru[:1])
             if la: put("owner_lat", la[:1])
             if not ru and la: put("owner", la[:1])
+        if "owner" in F or "owner_lat" in F:
+            ot, why = owner_type(F["owner"].value if "owner" in F else F["owner_lat"].value)
+            F["owner_type"] = Field(ot, min([F[k].confidence for k in ("owner", "owner_lat") if k in F]), why, valid=ot != "unknown")
         for k in ("region", "district", "locality", "street"): put(k, assign.get(k, []))
         for k, voc in (("street", ["ул", "пр-кт", "пер", "б-р", "ш", "наб", "пл", "проезд", "тер", "мкр", "аллея", "линия", "пр"]), ("locality", ["г", "п", "пос", "с", "д", "х", "ст", "аул", "пгт", "рп"]), ("district", ["р-н", "район"])):
             if k in F:
@@ -158,8 +190,10 @@ class STSBack(DocType):
         ap, aps = read_zone(x_kv1 + 0.01, 0.97, 0.5)
         F["apartment"] = Field(ap, aps, "пусто" if not ap else None, valid=True if not ap else None)
         # --- особые отметки: ниже подписи до полосы с рисунком
-        mk = [l for l in pool if y_marks - 0.01 < l.cy < y_marks + 0.04 and l.x0 > 0.3 and re.search(r"[А-Яа-яA-Za-z]{3}", l.text)]
-        F["special_marks"] = Field(_ru(" ".join(l.text for l in mk)) if mk else "", 0.8, "пусто" if not mk else None, valid=True)
+        mk = [l for l in pool if y_marks - 0.01 < l.cy < y_marks + 0.075 and l.x0 > 0.3 and re.search(r"[А-Яа-яA-Za-z]{3}", l.text)]
+        mk.sort(key=lambda l: (round(l.cy, 2), l.x0))
+        mk_txt, joins = join_breaks(_ru(" ".join(l.text for l in mk))) if mk else ("", [])
+        F["special_marks"] = Field(mk_txt, float(np.mean([l.score for l in mk])) if mk else 0.8, ("пусто" if not mk else (("склеены переносы без дефиса: " + ", ".join(joins)) if joins else None)), valid=True)
         # --- код подразделения ГИБДД (7 цифр, зачёркнут линией) и подпись ниже
         gl = [l for l in card_lines if re.search(r"ГИБДД|ГИБД", l.text.upper().replace("T", "Т")) and l.cy > 0.7]
         y_g = gl[0].cy if gl else 0.855
@@ -195,6 +229,10 @@ class STSBack(DocType):
                 dt = date(yr, mo, dd); ok = 2005 <= yr <= date.today().year
                 F["issue_date"] = Field(dt.isoformat(), float(np.mean([day[1].score, 0.5 + 0.5 * mr, 0.8])), f"{dd} {MONTHS[mo-1]} {yr}", valid=ok)
             except ValueError: pass
+        elif day and mo:   # год обрезан краем снимка — отдаём часть и помечаем partial
+            dd = int(re.sub(r"\D", "", day[0])[:2])
+            F["issue_date"] = Field(f"{dd:02d}.{mo:02d}.????", 0.4, f"{dd} {MONTHS[mo-1]}, год не прочитан (возможно, обрезан краем кадра)", valid=False, partial=True)
+        if "issue_date" in F and band and max(l.y1 for l in band) > 0.985: F["issue_date"].partial = True; F["issue_date"].note = ((F["issue_date"].note or "") + "; строка даты у самого края кадра — возможна обрезка").strip("; ")
         # --- номер: красный сверху и чёрный снизу
         top = bot = None
         for l in card_lines + v_lines:
@@ -209,4 +247,9 @@ class STSBack(DocType):
                 F["sts_number"] = Field(top[0] if ag else (top[0] if top[1] >= bot[1] else bot[0]), (min(1.0, (top[1] + bot[1]) / 2 + 0.03) if ag else 0.5 * max(top[1], bot[1])), "верх = низ" if ag else f"РАСХОЖДЕНИЕ: верх {top[0]}, низ {bot[0]}", valid=ag)
             else:
                 one = top or bot; F["sts_number"] = Field(one[0], one[1] * 0.8, "найден только один номер", valid=True)
+        try:
+            gm, gf = glare_mask(card)
+            if gf > 0: flag_fields(F, SPECS, pos, gm, ex)
+        except Exception as e:
+            ex.extra["glare_error"] = repr(e)[:100]
         return ex

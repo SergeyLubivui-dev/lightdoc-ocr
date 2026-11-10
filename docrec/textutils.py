@@ -100,7 +100,7 @@ def _lev(a: str, b: str) -> int:
 
 def snap_lat_to_ru(lat: str, ru: str, max_dist: int = 2) -> tuple[str, bool]:
     """Каждое латинское слово, близкое (<=max_dist правок) к транслитерации кириллического слова, заменяем транслитерацией.
-    «KAZANSKIL» -> «KAZANSKII». Слова короче 5 букв не трогаем (риск испортить)."""
+    «KRASNODARSKIL» -> «KRASNODARSKII». Слова короче 5 букв не трогаем (риск испортить)."""
     ru_words = [w for w in re.split(r"[\s]+", ru.upper()) if w]
     tr = {w: re.sub(r"[^A-Z]", "", translit(w)) for w in ru_words}
     out, changed = [], False
@@ -116,7 +116,7 @@ def snap_lat_to_ru(lat: str, ru: str, max_dist: int = 2) -> tuple[str, bool]:
 
 
 def split_given_names(ru: str, lat: str | None) -> str:
-    """«ИВАНПЕТРОВИЧ» -> «ИВАН ПЕТРОВИЧ»: ищем разрез, при котором транслитерация
+    """«ИВАНИВАНОВИЧ» -> «ИВАН ИВАНОВИЧ»: ищем разрез, при котором транслитерация
     первой части совпадает с первым латинским словом (если латиницы нет — по суффиксу отчества)."""
     if " " in ru.strip() or len(ru) < 8:
         return ru

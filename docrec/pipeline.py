@@ -370,6 +370,8 @@ class DocumentPipeline:
             ex = REGISTRY[doc_type].extract(card, lines, rec=self._rec_fn(), cell=self._cell_fn(), ocr=self.ocr, paddle=(self.paddle if self._paddle_available() else None))
             res["fields"] = {k: v.as_dict() for k, v in ex.fields.items()}
             res.update({k: v for k, v in ex.extra.items()})
+            if isinstance(ex.extra.get("glare"), dict) and ex.extra["glare"].get("flagged"):
+                res["warnings"].append("glare: блик на карточке закрывает значения полей " + ", ".join(ex.extra["glare"]["flagged"]) + " — помечены partial")
             T["extract"] = time.perf_counter() - t
             if ex.photo_zone:
                 x0, y0, x1, y1 = ex.photo_zone

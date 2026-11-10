@@ -22,7 +22,7 @@ ROWS = [("plate", "Регистрационный знак", .215, "А123ВС77"
         ("curb_mass_kg", "Масса в снаряженном состоянии, кг", .7445, "1060"), ("temp_reg", "Срок временной регистрации", .784, "")]
 
 
-def card_image(seed=0, value_shift=0.014, model=None, pitch=22):
+def card_image(seed=0, value_shift=0.014, model=None, pitch=22, vals=None, pts="ПТС: 77УТ123456", sts="77 12 123456", sep=False, glare=None):
     """model=(ru, lat): две строки марки/модели; pitch — шаг строк в пикселях (17 = строки касаются друг друга, как на реальном бланке)."""
     rng = np.random.default_rng(seed)
     bg = np.zeros((H, W, 3), np.float32) + (236, 228, 238)       # светлая розово-сиреневая «гознаковая» бумага (BGR)
@@ -39,8 +39,14 @@ def card_image(seed=0, value_shift=0.014, model=None, pitch=22):
         d.multiline_text((x, y), t, font=f, fill=fill, spacing=1)
     txt(W * .12, H * .06, "СВИДЕТЕЛЬСТВО О РЕГИСТРАЦИИ ТС", 27, FB, (40, 40, 50))
     txt(W * .12, H * .095, "CERTIFICAT D'IMMATRICULATION", 15, FR, (70, 70, 80))
-    for key, lab, y, val in ROWS:
-        if key == "make_model" and model: val = model[0] + "\n" + model[1]
+    rows = list(ROWS)
+    if sep and model:   # «Марка» и «Модель» — отдельные подписи, значение каждой — полное «марка модель» (кириллица / латиница)
+        i = [r[0] for r in rows].index("make_model")
+        rows[i:i + 1] = [("make_model", "Марка", .301, model[0]), ("model_lat", "Модель", .329, model[1])]
+    for key, lab, y, val in rows:
+        if vals and key in vals: val = vals[key]
+        if key == "make_model" and model and not sep: val = model[0] + "\n" + model[1]
+        if key == "model_lat" and sep: val = model[1]
         txt(W * .05, H * y - 14, lab, 17, FB, (45, 40, 50), wrap=W * .28)                  # печатные подписи: тёмные, мелкие
         if val:
             col = (172, 158, 148)                                                         # значения: бледные
@@ -48,9 +54,12 @@ def card_image(seed=0, value_shift=0.014, model=None, pitch=22):
                 t = line
                 if key in ("max_mass_kg", "curb_mass_kg"): t = line + " .. "
                 txt(W * .34, H * (y + value_shift) - 14 + (pitch if key == "make_model" else 22) * k, t, 22, FM, col)
-    txt(W * .05, H * .80, "ПТС: 77УТ123456", 22, FM, (172, 158, 148))
-    txt(W * .30, H * .915, "77 12 123456", 38, FB, (40, 40, 205))                         # красный номер
+    txt(W * .05, H * .80, pts, 22, FM, (172, 158, 148))
+    txt(W * .30, H * .915, sts, 38, FB, (40, 40, 205))                         # красный номер
     a = np.array(img).astype(np.float32); a += rng.normal(0, 2, a.shape)
+    if glare:   # блик на ламинате: (cx, cy, rx, ry) в долях карточки — яркое насыщенное пятно с мягким краем
+        yy, xx = np.mgrid[0:H, 0:W]; r = ((xx - glare[0] * W) / (glare[2] * W)) ** 2 + ((yy - glare[1] * H) / (glare[3] * H)) ** 2
+        k = np.clip(1.6 * (1 - r), 0, 1)[..., None]; a = a * (1 - k) + 255 * k
     return np.clip(a, 0, 255).astype(np.uint8)
 
 
@@ -71,7 +80,24 @@ def scene(card, name, W_=1200, H_=1700, angle=6, tilt=0.05, scale=0.62, seed=0, 
     json.dump({"corners_TL_TR_BR_BL": dst.tolist(), "fields": gt or GT_OVERRIDE or GT}, open(name.replace(".jpg", ".gt.json"), "w"), ensure_ascii=False)
 
 
+def trailer_scenes():
+    """прицеп: ГРЗ «ББ ЦЦЦЦ РР», ЭПТС (15 цифр), отдельные подписи «Марка»/«Модель», блик справа внизу (вымывает массу). Все данные вымышленные."""
+    g = dict(GT); g.update(plate="ВС456178", vin="XZZ933410M0000001", make_model="НЕФАЗ 93341 / NEFAZ 93341", make_model_ru="НЕФАЗ 93341", make_model_lat="NEFAZ 93341",
+                           vehicle_type="Полуприцеп фургон", category="Прицеп/O4", year="2021", chassis="XZZ933410M0000001", body="XZZ933410M0000001", color="Белый",
+                           eco_class="не установлено", pts="100234567890123", sts_number="99 00 000001")
+    for k in ("power", "max_mass_kg", "curb_mass_kg"): g.pop(k, None)
+    vals = dict(plate="ВС456178", vin="XZZ933410M0000001", vehicle_type="Полуприцеп фургон", category="Прицеп/O4", year="2021", chassis="XZZ933410M0000001", body="XZZ933410M0000001",
+                color="Белый", power="", eco_class="НЕ УСТАНОВЛЕНО", max_mass_kg="39000", curb_mass_kg="8236")
+    for n, (gl, a, tl) in enumerate([(None, 5, 0.06), ((0.82, 0.70, 0.22, 0.10), -4, 0.07)], 10):
+        gg = dict(g)
+        if gl: gg.pop("max_mass_kg", None)
+        scene(card_image(n, 0.017, model=("НЕФАЗ 93341", "NEFAZ 93341"), pitch=17, vals=vals, pts="ЭПТС: 100234567890123", sts="99 00 000001", sep=True, glare=gl),
+              f"samples/synth_sts{n}.jpg", angle=a, tilt=tl, scale=0.6, seed=n, gt=gg)
+
+
 if __name__ == "__main__":
+    trailer_scenes() if len(__import__("sys").argv) > 1 and __import__("sys").argv[1] == "trailer" else None
+    if len(__import__("sys").argv) > 1: raise SystemExit
     scene(card_image(0, 0.014), "samples/synth_sts1.jpg", angle=6, seed=1)
     scene(card_image(1, 0.020), "samples/synth_sts2.jpg", angle=-9, tilt=0.09, scale=0.58, seed=2)   # другой сдвиг значений
     # двуязычная марка/модель, строки вплотную (как на реальном бланке). Сценарии против путаниц: S5 (буква+цифра), 55 (две цифры — ложного «S» быть не должно),
@@ -89,3 +115,4 @@ if __name__ == "__main__":
             gj = json.load(open(name.replace(".jpg", ".gt.json"))); gj["fields"] = {k: v for k, v in gj["fields"].items() if k in ("make_model", "make_model_ru", "make_model_lat", "vehicle_type", "color", "eco_class")}   # проверяем только то, ради чего сцена (остальное при такой деградации не гарантируется)
             gj["corners_TL_TR_BR_BL"] = (np.array(gj["corners_TL_TR_BR_BL"]) * deg[0]).tolist()
             json.dump(gj, open(name.replace(".jpg", ".gt.json"), "w"), ensure_ascii=False)
+    trailer_scenes()

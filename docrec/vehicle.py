@@ -12,20 +12,24 @@ _CYR2LAT = {v: k for k, v in {"A": "А", "B": "В", "E": "Е", "K": "К", "M": "
 _DIG = {"O": "0", "О": "0", "Q": "0", "D": "0", "I": "1", "l": "1", "|": "1", "Z": "2", "З": "3", "S": "5", "B": "8", "В": "8", "G": "6", "Б": "6"}
 
 
+def _plate_try(s: str, fmt: str):
+    """fmt 'car': Б ЦЦЦ ББ РР(Р); 'trailer': ББ ЦЦЦЦ РР(Р) (прицепы; тип 4 по ГОСТ Р 50577)."""
+    let = (0, 4, 5) if fmt == "car" else (0, 1)
+    v = "".join((_LAT2CYR.get(ch, ch) if i in let else _DIG.get(ch, ch)) for i, ch in enumerate(s))
+    rx = rf"[{PLATE_LET}]\d{{3}}[{PLATE_LET}]{{2}}\d{{2,3}}" if fmt == "car" else rf"[{PLATE_LET}]{{2}}\d{{4}}\d{{2,3}}"
+    return v, bool(re.fullmatch(rx, v))
+
+
 def norm_plate(raw: str):
-    """-> (value 'А123ВС77', valid, note). Позиционный разбор: буква ЦИФРЫ(3) буквы(2) регион(2-3)."""
+    """-> (value 'А123ВС77', valid, note). Позиционный разбор: легковой/грузовой «буква ЦИФРЫ(3) буквы(2) регион(2-3)»
+    или прицеп «буквы(2) ЦИФРЫ(4) регион(2-3)»; выбирается формат, при котором строка валидна."""
     s = re.sub(r"[\s\-._]", "", raw.upper())
     if not (8 <= len(s) <= 9): return None, False, None
-    out = []
-    for i, ch in enumerate(s):
-        if i in (0, 4, 5):
-            c = _LAT2CYR.get(ch, ch)
-            out.append(c)
-        else:
-            out.append(_DIG.get(ch, ch))
-    v = "".join(out)
-    ok = bool(re.fullmatch(rf"[{PLATE_LET}]\d{{3}}[{PLATE_LET}]{{2}}\d{{2,3}}", v))
-    return v, ok, "".join(_CYR2LAT.get(c, c) for c in v) if ok else None
+    vc, okc = _plate_try(s, "car")
+    if okc: return vc, True, "".join(_CYR2LAT.get(c, c) for c in vc)
+    vt, okt = _plate_try(s, "trailer")
+    if okt: return vt, True, "".join(_CYR2LAT.get(c, c) for c in vt) + " (прицеп)"
+    return vc, False, None
 
 
 _VIN_FIX = {"O": "0", "Q": "0", "I": "1", "О": "0", "Х": "X", "С": "C", "Т": "T", "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "Р": "P", "У": "Y"}
@@ -51,7 +55,9 @@ def norm_vin(raw: str):
 def norm_pts(raw: str):
     """ПТС: 2 цифры + 2 кириллические буквы + 6 цифр ('77АА123456'), латинские двойники и 0/О исправляем позиционно."""
     s = re.sub(r"[^0-9A-Za-zА-Яа-я]", "", raw.upper())
-    s = re.sub(r"^ПТС", "", s)
+    s = re.sub(r"^(ЭПТС|ПТС)", "", s)
+    d15 = "".join(_DIG.get(c, c) for c in s)
+    if len(s) == 15 and d15.isdigit(): return d15, True   # электронный ПТС (ЭПТС): 15 цифр
     if len(s) != 10: return None, False
     out = []
     for i, ch in enumerate(s):
@@ -80,10 +86,10 @@ _CAT = re.compile(r"^(A1?|B1?|C1?E?|D1?E?|BE|M|Tb|Tm|[ABCDEM])$")
 
 def norm_category(raw: str):
     """«C/N3» -> {'category': 'C', 'class': 'N3'}; допустимо только 'C' или только 'N3'."""
-    s = raw.upper().replace(" ", "").replace("\\", "/").replace("|", "/")
+    s = re.sub(r"(ПОЛУ)?ПРИЦЕП", "", raw.upper()).replace(" ", "").replace("\\", "/").replace("|", "/").strip("/")
     s = "".join({"А": "A", "В": "B", "С": "C", "Е": "E", "М": "M", "О": "O", "Д": "D", "З": "3", "Ч": "4"}.get(c, c) for c in s)
     s = re.sub(r"[^A-Z0-9/]", "", s)
-    s = re.sub(r"\bN(?=[0-9]\b)", "N", s)
+    s = re.sub(r"(?:(?<=/)|^)0(?=\d$)", "O", s) if re.search(r"ПРИЦЕП", raw.upper()) else s   # «04» вместо «O4»
     m = re.fullmatch(r"([ABCDEM]\d?E?)?/?(([LMNOT])(\d[A-C]?)?)?", s)
     if not m or not s: return None, False
     cat, cls = m.group(1), m.group(2)

@@ -1,0 +1,23 @@
+{
+ "fields": {
+  "issued_by": "ГУ МВД РОССИИ ПО Г.МОСКВЕ",
+  "issue_date": "04.09.2019",
+  "dept_code": "770-099",
+  "surname": "ОБРАЗЦОВА",
+  "name": "МАРИЯ",
+  "patronymic": "ИГОРЕВНА",
+  "sex": "ЖЕН.",
+  "birth_date": "02.11.1992",
+  "birth_place": "ГОР. КАЗАНЬ РЕСП. ТАТАРСТАН",
+  "series": "45 19",
+  "number": "654321"
+ },
+ "pages": [
+  "registration",
+  "main_spread"
+ ],
+ "summary": {
+  "has_main_spread": true,
+  "has_registration": true
+ }
+}

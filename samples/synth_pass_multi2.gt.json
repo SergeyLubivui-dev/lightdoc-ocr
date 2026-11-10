@@ -1,0 +1,23 @@
+{
+ "fields": {
+  "issued_by": "ОТДЕЛОМ УФМС РОССИИ ПО ТВЕРСКОЙ ОБЛАСТИ В ГОР. ТВЕРИ",
+  "issue_date": "12.03.2015",
+  "dept_code": "690-001",
+  "surname": "ТЕСТОВ",
+  "name": "ИВАН",
+  "patronymic": "ПЕТРОВИЧ",
+  "sex": "МУЖ.",
+  "birth_date": "15.06.1985",
+  "birth_place": "ГОР. ТВЕРЬ",
+  "series": "28 15",
+  "number": "123456"
+ },
+ "pages": [
+  "registration",
+  "main_spread"
+ ],
+ "summary": {
+  "has_main_spread": true,
+  "has_registration": true
+ }
+}

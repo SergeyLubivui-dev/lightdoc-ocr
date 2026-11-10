@@ -60,7 +60,18 @@
   и **сверяются с печатными полями**: при валидных контрольных суммах путаницы похожих букв исправляются по МРЗ; расхождения помечаются в `note`
   (`печать = МРЗ` / `из МРЗ` / `исправлено по МРЗ` / `РАСХОЖДЕНИЕ`). Валидаторы: правдоподобие дат, выдача не раньше 14-летия (флаг, а не отказ), код подразделения `NNN-NNN`, пол.
   Вырезается фото владельца. Форматы: `--mode passport` форсирует тип.
-- Заготовка (только опознаётся): СНИЛС-карта.
+- **Несколько разворотов на одном листе** (скан/копия): лист режется по пустым промежуткам (XY-разрез по маске «чернил»), каждый кусок классифицируется
+  (`main_spread` / `registration` / `passport_page` / `unknown`): основной разворот читается полностью, со страницы регистрации — серия/номер (вертикальная полоса), штампы
+  (в т.ч. повёрнутые на 90°: «ЗАРЕГИСТРИРОВАН»), орган регистрации и год/дата best-effort (рукописные записи не распознаются), серия/номер сверяются между страницами.
+  Ответ: `document.type=passport_rf`, `pages:[{kind, bbox, found, fields…}]`, `summary:{has_main_spread, has_registration, registration_stamps, series_number_cross_check}`;
+  один разворот в кадре обрабатывается как раньше. Код: `docrec/spreads.py`, `docrec/passport_pages.py`.
+- **Лексиконы полей** (`docrec/lexicons/<тип>/<поле>.txt.gz`, `shared/…`; ≈145 КБ, грузятся лениво): привязка искажённого OCR-значения к ближайшей записи по
+  взвешенному расстоянию Левенштейна с матрицей визуальных путаниц (кириллица↔латиница, 0/8, 5/S/8, Н/М, Б/В…). Привязка только выше порога схожести, иначе значение
+  остаётся как есть, уверенность снижается; в `note` — `лексикон: «сырое» → «значение» (расстояние d)`. Типы ТС/цвета/экокласс/марки/модели и суффиксы КАМАЗ (СТС),
+  регионы (оборот СТС), имена/отчества/слова органа выдачи/города (паспорт, ВУ), категории/метки ВУ, СНИЛС, удостоверение тракториста, международное ВУ.
+  Фамилии **не подменяются** (открытое множество): лексикон только повышает уверенность, а для неизвестных добавляет подсказку «возможна путаница»; названия мест тоже
+  не подменяются — только подсказка. Источники — только публичные (Faker ru_RU, OpenCorpora/pymorphy3-dicts-ru, справочники субъектов РФ, ГОСТ/конвенции); сборка: `tools/build_lexicons.py`.
+- Заготовки (только опознаются; лексиконы поставляются, экстракторов пока нет): СНИЛС-карта, удостоверение тракториста-машиниста, международное водительское удостоверение.
 
 ### Поддерживаемые типы
 
@@ -71,7 +82,8 @@
 | Страница / договор | полностью | текст, реквизиты с контрольными суммами |
 | СТС (оборот) | полностью | 13 полей: адрес, код ГИБДД, дата выдачи, номер СТС |
 | Паспорт РФ (разворот) | полностью | 11 полей + МРЗ, серия/номер с двух страниц, фото |
-| СНИЛС-карта | заготовка | только опознаётся |
+| Паспорт РФ (лист из нескольких разворотов) | полностью | `pages[]`: основной разворот (11 полей), регистрация (штамп, орган, серия/номер), сверка серии |
+| СНИЛС-карта, удостоверение тракториста, международное ВУ | заготовка | опознаются; лексиконы поля готовы |
 
 ### Привязка полей по последовательности
 
@@ -82,7 +94,7 @@
 значения (с вычтенными подписями и усиленным контрастом) — Paddle, затем выбирается лучший вариант по каждому полю (`valid`, затем `confidence`).
 Для ВУ те же идеи применены к калибровке шаблона (монотонный отбор подписей), шаблонные зоны остаются запасом. Код: `docrec/anchors.py`, `docrec/ink.py`, `docrec/doctypes/sts.py`, `docrec/doctypes/sts_back.py`, `docrec/makemodel.py` (марка/модель, цвет).
 Паспорт: `docrec/doctypes/passport.py` и `docrec/mrz.py`; там весь разворот прогоняется Paddle (длинная сторона до 1800 px) после выбора ориентации и выпрямления наклона,
-страницы делятся по позициям подписей, значения чистятся словарём (омоглифы, слова органа выдачи).
+страницы делятся по позициям подписей, значения чистятся словарём (омоглифы, слова органа выдачи) и лексиконами (`docrec/lexicon.py`).
 
 ## Стек
 
@@ -169,8 +181,8 @@ class MyDoc(DocType):
 - Tesseract плохо читает совсем мелкую латиницу (<~10 px) и сильный блик; при слабом результате включается Paddle-запас (если установлен).
 - Страница: печать поверх текста закрывает слова; наклон >10–15° не выпрямляется (поворот только кратный 90°).
 - Низкое разрешение (карточка < ~700 px по ширине) резко ухудшает цифры (`warnings: low_resolution`).
-- СТС: проверено на одном реальном (лицо и оборот) и синтетических снимках; суффикс модели (S↔5), длинные значения у обреза карточки и цвет читаются хуже, смотрите `confidence`/`partial`. Марка/модель: разбор рассчитан на вид «МАРКА 1234-XX» (КАМАЗ, ЛАДА, ГАЗ…); модели без цифрового номера (названия словами) читаются по старой схеме без сверки языков; неоднозначность S/5 разрешается по уверенности символов — смотрите `note`. Склейка лица и оборота в один результат не реализована. Код ГИБДД на бледных/зачёркнутых бланках может не читаться; СНИЛС-карта пока только опознаётся.
-- Паспорт: наклон выпрямляется поворотом (±10°), перспектива (снимок под углом) не исправляется; на снимках <~500 px по ширине серия/номер и мелкие слова органа выдачи читаются с ошибками (В↔Б, И↔П), при этом `confidence` ниже; МРЗ на нечётких/поддельных образцах может быть внутренне несогласован — тогда стоит `РАСХОЖДЕНИЕ`, а в поле остаётся печатное значение. Только разворот с фото и данными (страницы регистрации — нет). Проверено на небольшом числе реальных и синтетических снимков — не заменяет ручной контроль.
+- СТС: проверено на одном реальном (лицо и оборот) и синтетических снимках; суффикс модели (S↔5), длинные значения у обреза карточки и цвет читаются хуже, смотрите `confidence`/`partial`. Марка/модель: разбор рассчитан на вид «МАРКА 1234-XX» (КАМАЗ, ЛАДА, ГАЗ…); модели без цифрового номера (названия словами) читаются по старой схеме без сверки языков; неоднозначность S/5 и 0/8 разрешается голосованием двух строк, второй проход по цифровой части (Tesseract с белым списком цифр), списком известных моделей и суффиксов КАМАЗ — при расхождении строк уверенность снижается, варианты в `note`. Глифовые признаки (дырки/заливка 0 vs 8) на размытой матричной печати ненадёжны и не используются как основной критерий. Склейка лица и оборота в один результат не реализована. Код ГИБДД на бледных/зачёркнутых бланках может не читаться; СНИЛС-карта пока только опознаётся.
+- Паспорт: наклон выпрямляется поворотом (±10°), перспектива (снимок под углом) не исправляется; на снимках <~500 px по ширине серия/номер и мелкие слова органа выдачи читаются с ошибками (В↔Б, И↔П), при этом `confidence` ниже; МРЗ на нечётких/поддельных образцах может быть внутренне несогласован — тогда стоит `РАСХОЖДЕНИЕ`, а в поле остаётся печатное значение. Основной разворот читается полностью; со страницы регистрации — только штамп/орган/серия-номер best-effort (рукописный текст не распознаётся). Размытые копии: фамилия может читаться с путаницей М/Н — смотрите `note` (варианты чтения). Проверено на небольшом числе реальных и синтетических снимков — не заменяет ручной контроль.
 - Не используйте для чужих документов без законного основания; обработка персональных данных регулируется законом.
 
 ## Лицензии
@@ -208,7 +220,18 @@ Lightweight, fully offline recognition of Russian documents. CPU-only; no image 
   and **cross-checked against the printed fields**: with valid checksums, look-alike letter confusions are corrected from the MRZ; disagreements are reported in `note`
   (`printed = MRZ` / `from MRZ` / `corrected from MRZ` / `MISMATCH`). Validators: plausible dates, issue not before the 14th birthday (flag, not rejection), department code `NNN-NNN`, sex.
   The holder photo is cropped. `--mode passport` forces the type.
-- Stub (classification only): SNILS card.
+- **Several passport spreads on one sheet** (scan/photocopy): the sheet is cut at empty gutters (XY-cut over an ink mask) and every piece is classified
+  (`main_spread` / `registration` / `passport_page` / `unknown`): the main spread is read in full; from the registration page we read the series/number (vertical strip), stamps
+  (including 90°-rotated "ЗАРЕГИСТРИРОВАН"), the registering authority and a year/date on a best-effort basis (handwriting is not recognised); series/number are cross-checked across pages.
+  Output: `document.type=passport_rf`, `pages:[{kind, bbox, found, fields…}]`, `summary:{has_main_spread, has_registration, registration_stamps, series_number_cross_check}`;
+  a single spread in the frame is processed as before. Code: `docrec/spreads.py`, `docrec/passport_pages.py`.
+- **Field lexicons** (`docrec/lexicons/<doctype>/<field>.txt.gz`, `shared/…`; ≈145 KB, lazily loaded): a garbled OCR value is snapped to the nearest entry by a
+  weighted Levenshtein distance with a visual-confusion matrix (Cyrillic↔Latin look-alikes, 0/8, 5/S/8, Н/М, Б/В…). Snapping happens only above a similarity threshold, otherwise the value
+  stays as is with lower confidence; `note` records `лексикон: «raw» → «value» (distance d)`. Vehicle type/colour/eco class/makes/models and KAMAZ suffixes (STS),
+  regions (STS back), first names/patronymics/issuer words/cities (passport, licence), licence categories/marks, SNILS, tractor licence, international driving permit.
+  Surnames are **never substituted** (open set): the lexicon only boosts confidence and adds a "possible confusion" hint for unknown ones; place names are hint-only too.
+  Public sources only (Faker ru_RU, OpenCorpora/pymorphy3-dicts-ru, official region lists, conventions); build with `tools/build_lexicons.py`.
+- Stubs (classification only; lexicons shipped, extractors pending): SNILS card, tractor-driver licence, international driving permit.
 
 ### Supported types
 
@@ -219,7 +242,8 @@ Lightweight, fully offline recognition of Russian documents. CPU-only; no image 
 | Free-text page / contract | full | text, checksum-validated requisites |
 | STS (back) | full | 13 fields: address, GIBDD code, issue date, STS number |
 | Russian passport (spread) | full | 11 fields + MRZ, series/number from both pages, photo |
-| SNILS card | stub | classification only |
+| Russian passport (multi-spread sheet) | full | `pages[]`: main spread (11 fields), registration (stamp, authority, series/number), series cross-check |
+| SNILS card, tractor licence, international permit | stub | classification only; field lexicons ready |
 
 ### Sequence-anchored field matching
 
@@ -230,7 +254,7 @@ For faint print the ink layers are separated: dark labels go to Tesseract, value
 (`valid`, then `confidence`). The driver licence uses the same idea for template calibration (monotone label selection); template zones stay as the fallback.
 Code: `docrec/anchors.py`, `docrec/ink.py`, `docrec/doctypes/sts.py`, `docrec/doctypes/sts_back.py`, `docrec/makemodel.py` (make/model, colour).
 Passport: `docrec/doctypes/passport.py` and `docrec/mrz.py`; the whole spread goes through Paddle (long side up to 1800 px) after orientation and skew correction,
-pages are split by label positions, values are cleaned with vocabularies (homoglyphs, issuer words).
+pages are split by label positions, values are cleaned with vocabularies (homoglyphs, issuer words) and lexicons (`docrec/lexicon.py`).
 
 ## Stack
 
@@ -283,8 +307,8 @@ up from the registry (see the example in the Russian section). Debug with `debug
 - Tesseract struggles with very small Latin text (<~10 px) and strong glare; the Paddle fallback (if installed) covers part of these cases.
 - Pages: stamps over text hide words; skew >10–15° is not corrected (only 90° steps).
 - Low resolution (card narrower than ~700 px) hurts digits (`warnings: low_resolution`).
-- STS: tested on one real (front and back) and synthetic photos; the model suffix (S↔5), long values cut at the card edge and colour are read less reliably — see `confidence`/`partial`. Make/model parsing expects the "MAKE 1234-XX" form (KAMAZ, LADA, GAZ…); names without a numeric model use the old single-line path without the language cross-check; S/5 ambiguity is resolved from per-character confidence — see `note`. Merging front and back into one result is not implemented. The GIBDD code on faint/struck-through forms may be unreadable; the SNILS card is a classification stub.
-- Passport: skew is fixed by rotation (±10°), perspective (shots at an angle) is not corrected; on photos narrower than ~500 px the series/number and small issuer words are read with errors (В↔Б, И↔П) with lower `confidence`; the MRZ of blurry/fake specimens may be internally inconsistent — then `MISMATCH` is reported and the printed value is kept. Photo-page spread only (no registration pages). Tested on a small set of real and synthetic images — not a substitute for manual review.
+- STS: tested on one real (front and back) and synthetic photos; the model suffix (S↔5), long values cut at the card edge and colour are read less reliably — see `confidence`/`partial`. Make/model parsing expects the "MAKE 1234-XX" form (KAMAZ, LADA, GAZ…); names without a numeric model use the old single-line path without the language cross-check; S/5 and 0/8 ambiguity is resolved by two-line voting, a second digits-only pass (Tesseract with a digit whitelist), and the list of known KAMAZ models/suffixes — when the lines disagree confidence is lowered and the alternatives are in `note`. Glyph features (holes/fill of 0 vs 8) are unreliable on blurry dot-matrix print and are not the primary criterion. Merging front and back into one result is not implemented. The GIBDD code on faint/struck-through forms may be unreadable; the SNILS card is a classification stub.
+- Passport: skew is fixed by rotation (±10°), perspective (shots at an angle) is not corrected; on photos narrower than ~500 px the series/number and small issuer words are read with errors (В↔Б, И↔П) with lower `confidence`; the MRZ of blurry/fake specimens may be internally inconsistent — then `MISMATCH` is reported and the printed value is kept. The main spread is read in full; from a registration page only the stamp/authority/series-number are read best-effort (handwriting is not recognised). Blurry copies: the surname may be read with М/Н confusion — see `note` (reading variants). Tested on a small set of real and synthetic images — not a substitute for manual review.
 - Do not process other people's documents without a legal basis; personal data processing is regulated by law.
 
 ## Licenses

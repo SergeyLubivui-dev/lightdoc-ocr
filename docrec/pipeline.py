@@ -91,6 +91,15 @@ class DocumentPipeline:
         img = imread(path)
         if self.mode == "page":
             return self._process_page(img, path, out, t0, reason="mode=page")
+        if self.mode in ("auto", "passport"):    # несколько разворотов на одном листе (скан/копия) — делим и читаем каждый
+            try:
+                from .spreads import split_spreads
+                parts = split_spreads(img)
+            except Exception:
+                parts = []
+            if len(parts) >= 2:
+                r = self._process_multi(img, parts, path, out, t0)
+                if r is not None: return r
         if self.mode == "passport":
             r = self._process_passport(img, path, out, t0)
             if r is not None: return r
@@ -117,6 +126,83 @@ class DocumentPipeline:
     def _passport_cues(text: str) -> int:
         t = text.upper(); pats = [r"УФМС", r"\bМВД\b", r"ПАСПОРТ\s*ВЫДАН", r"КОД\s*ПОДРАЗДЕЛЕНИЯ", r"\b(?:МУЖ|ЖЕН)\.", r"\b\d{3}\s*[-–—]\s*\d{3}\b", r"PNRUS", r"МЕСТО\s*РОЖДЕНИЯ"]
         return sum(bool(re.search(p, t)) for p in pats)
+
+    def _process_multi(self, img, parts, path, out, t0):
+        """Лист с несколькими разворотами паспорта -> pages[...] + сводка. None, если ни один кусок не похож на страницу паспорта."""
+        from .doctypes.passport import cue_count, PassportRF
+        from .passport_pages import read_registration
+        H0, W0 = img.shape[:2]; T = {}; pages = []; main = None; regs = []
+        for i, part in enumerate(parts, 1):
+            crop = part["crop"]; x0, y0, x1, y1 = part["bbox"]
+            t = time.perf_counter()
+            h, w = crop.shape[:2]; sc = 1400 / max(h, w) if max(h, w) > 1600 else 1.0
+            small = cv2.resize(crop, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA) if sc != 1.0 else crop
+            quick = cue_count(self.paddle(small, merge=False))
+            pg = {"index": i, "bbox": [int(x0), int(y0), int(x1), int(y1)], "kind": "unknown", "found": False}
+            if quick >= 3 and main is None:
+                r = self._process_passport(crop, path, (out / f"page{i}_main").resolve() if (out / f"page{i}_main").mkdir(parents=True, exist_ok=True) is None else out, t0)
+                if r is not None:
+                    main = (i, r)
+                    pg.update(kind="main_spread", found=True, fields=r["fields"], confidence=r["confidence"], orientation=r.get("orientation"))
+                    pages.append(pg); T[f"page{i}"] = time.perf_counter() - t; continue
+            reg = read_registration(self, crop)
+            if reg["kind"] == "unknown" and reg["cues"] == 0 and main is None:
+                r = self._process_passport(crop, path, (out / f"page{i}_main").resolve() if (out / f"page{i}_main").mkdir(parents=True, exist_ok=True) is None else out, t0)   # повёрнутый разворот: перебор ориентаций
+                if r is not None:
+                    main = (i, r); pg.update(kind="main_spread", found=True, fields=r["fields"], confidence=r["confidence"]); pages.append(pg); T[f"page{i}"] = time.perf_counter() - t; continue
+            pg.update(kind=reg["kind"], found=reg["kind"] in ("registration", "passport_page"), stamps=reg["stamps"], fields=reg["fields"], cues=reg["cues"])
+            if reg["series_number"]: pg["series_number"] = f"{reg['series_number']['series']} {reg['series_number']['number']}"
+            if reg["kind"] == "registration": regs.append((i, reg))
+            if reg["kind"] == "registration" and reg["fields"].get("registration_authority") is None: pg["warnings"] = ["штамп найден, орган регистрации не прочитан"]
+            pages.append(pg); T[f"page{i}"] = time.perf_counter() - t
+        if main is None and not regs and not any(p["found"] for p in pages): return None
+        # --- сверка серии/номера между страницами (поля основного разворота — словари as_dict)
+        F = main[1]["fields"] if main is not None else {}
+        sn_main = None; cross = []; status = None
+        if "series" in F and "number" in F and F["number"].get("value") and F["series"].get("value"): sn_main = f"{F['series']['value']} {F['number']['value']}"
+        sns = [(p["index"], p["series_number"]) for p in pages if p.get("series_number")]
+        add = lambda f, t: f.__setitem__("note", ((f.get("note") + "; ") if f.get("note") else "") + t)
+        if sn_main and sns:
+            agree = [i for i, v in sns if v == sn_main]; dis = [(i, v) for i, v in sns if v != sn_main]
+            status = "agree" if agree and not dis else ("mismatch" if dis and not agree else "partial")
+            for k in ("series", "number"):
+                f = F[k]
+                if status == "agree": f["confidence"] = round(min(1.0, float(f["confidence"]) + 0.03), 3); add(f, "совпало с серией/номером на странице регистрации")
+                elif status == "mismatch": f["confidence"] = round(float(f["confidence"]) * 0.7, 3); add(f, "РАСХОЖДЕНИЕ с серией/номером на другой странице: " + ", ".join(v for _, v in dis))
+        elif not sn_main and sns and main is not None:
+            i, v = sns[0]; ser, num = v.rsplit(" ", 1)
+            F["series"] = dict(value=ser, confidence=0.6, valid=True, note=f"из страницы {i} (на основном развороте не прочитано)")
+            F["number"] = dict(value=num, confidence=0.6, valid=len(num) == 6, note=f"из страницы {i} (на основном развороте не прочитано)")
+        exp = PassportRF.expected_fields
+        for pg in pages:
+            if pg["kind"] == "main_spread": pg["fields"] = F
+        res = {"image": str(path), "image_size": [W0, H0], "engine": "paddle(+tesseract)", "doc_type": "passport_rf", "doc_type_title": PassportRF.title_ru,
+               "document": {"type": "passport_rf", "multi_page": True, "pages_n": len(pages)},
+               "confidence": float(main[1]["confidence"]) if main is not None else 0.5,
+               "route": "passport: несколько страниц на листе — XY-разрез по пустым промежуткам, классификация каждого куска, чтение основного разворота и страницы регистрации",
+               "warnings": [], "fields": F, "files": {}, "pages": pages,
+               "summary": {"pages_found": sum(1 for p in pages if p["found"]), "has_main_spread": main is not None, "has_registration": bool(regs),
+                           "registration_stamps": int(sum(p.get("stamps", 0) for p in pages if p["kind"] == "registration")), "series_number_cross_check": status}}
+        if main is None: res["warnings"].append("main_spread_not_found: основной разворот на листе не найден")
+        else:
+            miss = [k for k in exp if k not in F]
+            if miss: res["warnings"].append("not_found: " + ", ".join(miss))
+            res["files"]["card"] = main[1]["files"].get("card"); res["files"]["photo"] = main[1]["files"].get("photo")
+            for k in ("photo", "orientation", "mrz", "checks"):
+                if k in main[1]: res[k] = main[1][k]
+        for pg in pages:
+            i = pg["index"]; x0, y0, x1, y1 = pg["bbox"]
+            imwrite(out / f"page{i}_{pg['kind']}.jpg", img[y0:y1, x0:x1]); pg["file"] = str(out / f"page{i}_{pg['kind']}.jpg")
+        dbg = img.copy(); th = max(2, int(max(W0, H0) / 600))
+        for pg in pages:
+            x0, y0, x1, y1 = pg["bbox"]; cv2.rectangle(dbg, (x0, y0), (x1, y1), (0, 200, 0) if pg["found"] else (0, 0, 255), th)
+            cv2.putText(dbg, f"{pg['index']}:{pg['kind']}", (x0 + 10, y0 + 40 + 4 * th), cv2.FONT_HERSHEY_SIMPLEX, max(1.0, W0 / 1400), (0, 0, 255), th)
+        imwrite(out / "debug.jpg", dbg); res["files"]["debug"] = str(out / "debug.jpg")
+        T["total"] = time.perf_counter() - t0
+        res["timings_sec"] = {k: round(v, 3) for k, v in T.items()}; res["peak_rss_mb"] = round(peak_rss_mb(), 1)
+        with open(out / "result.json", "w", encoding="utf-8") as f: json.dump(res, f, ensure_ascii=False, indent=2, default=str)
+        res["files"]["json"] = str(out / "result.json")
+        return res
 
     def _process_passport(self, img, path, out, t0):
         from .doctypes.passport import read_passport, PassportRF

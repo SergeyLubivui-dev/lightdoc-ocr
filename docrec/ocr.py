@@ -60,6 +60,25 @@ class OCREngine:
         return r.txts[0].strip(), float(r.scores[0])
 
 
+
+def _recognize_chars(self, crop_bgr: np.ndarray):
+    """Распознавание строки с уверенностью по символам -> (text, score, [conf на символ текста])."""
+    r = self.engine(crop_bgr, use_det=False, use_cls=False, use_rec=True, return_word_box=True)
+    if r is None or not r.txts:
+        return "", 0.0, []
+    t = r.txts[0]; confs = []
+    try:
+        confs = [float(x) for x in r.word_results[0].confs]
+    except Exception:
+        confs = []
+    if len(confs) != len(t):
+        confs = [float(r.scores[0])] * len(t)
+    return t, float(r.scores[0]), confs
+
+
+OCREngine.recognize_chars = _recognize_chars
+
+
 _LABEL = re.compile(r"^\s*\d{1,2}\s*[abcабс]?\s*[.)]?\s*$", re.I)
 
 

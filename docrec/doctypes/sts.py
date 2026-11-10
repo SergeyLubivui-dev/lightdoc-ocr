@@ -7,6 +7,7 @@ from ..ocr import Line
 from ..textutils import fold
 from .. import anchors, vehicle as V
 from ..ink import split_ink
+from .. import makemodel as MM
 from .base import DocType, Extraction, Field, register
 
 SPECS = [
@@ -104,7 +105,7 @@ class STS(DocType):
                 ("МАРКА МОДЕЛЬ", 1), ("ЭКОЛОГИЧЕСКИЙ КЛАСС", 1), ("СРОК ВРЕМЕННОЙ РЕГИСТРАЦИИ", 1)]
     implemented = True
     hybrid_internal = True
-    expected_fields = ["plate", "vin", "make_model", "vehicle_type", "category", "year", "chassis", "body", "color", "power", "eco_class", "max_mass_kg", "curb_mass_kg", "pts", "sts_number"]
+    expected_fields = ["plate", "vin", "make_model", "make_model_ru", "make_model_lat", "vehicle_type", "category", "year", "chassis", "body", "color", "power", "eco_class", "max_mass_kg", "curb_mass_kg", "pts", "sts_number"]
 
     # ---- одна «попытка»: линии значений от одного движка -> поля-кандидаты
     def _fields_from(self, specs, pos, vlines, W):
@@ -187,6 +188,28 @@ class STS(DocType):
             if src != "tesseract": note = ((note + "; ") if note else "") + f"engine={src}"
             if c["partial"]: note = ((note + "; ") if note else "") + "значение у края карточки — возможно обрезано"
             F[k] = Field(val, conf, note, valid=c["valid"], partial=True if c["partial"] else None)
+        # 4a) цвет: если подпись не найдена или уверенность низкая — несколько окон/слоёв + словарь
+        if paddle is not None and ("color" not in F or F["color"].confidence < 0.8):
+            try:
+                ic = [s_.key for s_ in SPECS].index("color"); sh = (engines[-1][1].get("shift_rel", 0.4) if engines else 0.4)
+                cr = MM.read_color(card, Vimg, pos[ic][0] + sh * 0.04, paddle, V.norm_color)
+            except Exception as e:
+                cr = None; ex.extra["color_error"] = repr(e)[:120]
+            if cr and ("color" not in F or cr["conf"] > F["color"].confidence):
+                F["color"] = Field(cr["value"], cr["conf"], f"словарь цветов; {cr['n']} совпад. чтений в разных окнах/слоях (доля {cr['share']:.0%})", valid=True)
+        # 4b) марка/модель: две плотные строки (кириллица + латиница) — отдельный разрез, перечитывание и сверка строк (makemodel.py)
+        if paddle is not None:
+            try:
+                mm = MM.read_make_model(card, Vimg, pos[[s_.key for s_ in SPECS].index("make_model")][0], paddle, cell)
+            except Exception as e:   # не должно ронять весь СТС
+                mm = None; ex.extra["make_model_error"] = repr(e)[:120]
+            if mm and mm["combined"] and (mm["valid"] or "make_model" not in F or mm["conf"] > F["make_model"].confidence):
+                note = "; ".join(mm["notes"]) or None
+                if mm["agree"] is False: note = (note + "; " if note else "") + "модель в строках ru/lat прочитана по-разному"
+                for key, val in (("make_model_ru", mm["ru"]), ("make_model_lat", mm["lat"])):
+                    if val: F[key] = Field(val, mm["conf"], note if key == "make_model_ru" or not mm["ru"] else None, valid=mm["valid"])
+                F["make_model"] = Field(mm["combined"], mm["conf"], ("две строки бланка (кириллица / латиница), сверены по транслитерации" if mm["lines"] == 2 else "одна строка бланка") + ("; " + note if note else ""), valid=mm["valid"])
+                ex.extra["make_model_check"] = {k: mm[k] for k in ("lines", "agree", "y_lab", "block", "cuts", "candidates")}
         if "power" in F and isinstance(F["power"].value, dict) and "hp" not in F["power"].value: F["power"].partial = True
         # 5) ПТС и номер СТС — по шаблону строки, независимо от подписей
         pool = list(lines) + llines + (tv or [])

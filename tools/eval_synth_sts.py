@@ -1,4 +1,4 @@
-"""Оценка СТС (лицо и оборот) на синтетических сценах (вымышленные данные). make_model: допускается кириллица или латиница (две строки на бланке)."""
+"""Оценка СТС (лицо и оборот) на синтетических сценах (вымышленные данные). марка/модель — две строки бланка (ru/lat/combined)."""
 import sys, json, os, glob, warnings
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,7 +11,6 @@ for f in sorted(glob.glob("samples/synth_sts[0-9].jpg") + glob.glob("samples/syn
     bad = {}
     for k, v in gt.items():
         got = r["fields"].get(k, {}).get("value")
-        if k == "make_model" and got in ("LADA 2190", "ЛАДА 2190"): continue
         if got != v: bad[k] = got
     tot += len(gt); ok_all += len(gt) - len(bad)
     print(f"{os.path.basename(f)}: type={r['doc_type']} fields {len(gt)-len(bad)}/{len(gt)} t={r['timings_sec']['total']}s rss={r['peak_rss_mb']}MB", bad or "")

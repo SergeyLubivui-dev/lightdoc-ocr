@@ -49,6 +49,9 @@
 - **СТС** (свидетельство о регистрации ТС, лицевая сторона, фото портретной карточки): рег. знак, VIN, марка/модель, тип, категория, год,
   шасси, кузов, цвет, мощность (кВт/л.с.), экологический класс, массы, ПТС, номер СТС. У каждого поля `confidence` и `valid`
   (формат рег. знака с омоглифами, VIN 17 знаков без I/O/Q, ПТС, диапазон года, словари цветов/классов); значения у края карточки помечены `partial`.
+  **Марка/модель** на бланке печатается двумя плотными строками (кириллица и латиница): они режутся по профилю проекции, каждая перечитывается в нескольких вариантах кропа
+  (Paddle + Tesseract), затем сверяются по транслитерации (КАМАЗ↔KAMAZ) и голосуют вместе, так как модель в обеих строках одна — согласие строк исправляет путаницы S/5, O/0, B/8, Z/2
+  (`make_model_ru`, `make_model_lat` и объединённое `make_model` «КАМАЗ 5490-S5 / KAMAZ 5490-S5»). Цвет читается по нескольким окнам со словарным совпадением.
 - **СТС, оборот** (адрес владельца, код ГИБДД, дата выдачи, номер СТС вверху и внизу): владелец (кириллица/латиница), регион, район, населённый пункт, улица,
   дом/корпус/квартира, особые отметки, код подразделения ГИБДД, дата выдачи (ISO), номер СТС (верхний и нижний должны совпасть). Сторона определяется автоматически (`extra.side`: `front`/`back`).
 - **Паспорт РФ** (разворот, фото с телефона/из интернета, любой поворот 0/90/180/270° и наклон ±10°): орган выдачи, дата выдачи, код подразделения, ФИО, пол,
@@ -64,7 +67,7 @@
 | Тип | Статус | Поля |
 |---|---|---|
 | Водительское удостоверение РФ (2011+, лицо) | полностью | 18 полей, фото, категории по ячейкам |
-| СТС (лицо) | полностью | 15 полей, валидаторы, `partial` у края |
+| СТС (лицо) | полностью | 15 полей + марка/модель на двух языках, валидаторы, `partial` у края |
 | Страница / договор | полностью | текст, реквизиты с контрольными суммами |
 | СТС (оборот) | полностью | 13 полей: адрес, код ГИБДД, дата выдачи, номер СТС |
 | Паспорт РФ (разворот) | полностью | 11 полей + МРЗ, серия/номер с двух страниц, фото |
@@ -77,7 +80,7 @@
 максимальная **монотонная** цепочка (пропущенная или искажённая подпись не ломает остальные — её позиция интерполируется), а строки значений
 распределяются между соседними подписями с оценкой общего сдвига. Для бледной печати слои разделяются: тёмные подписи читает Tesseract,
 значения (с вычтенными подписями и усиленным контрастом) — Paddle, затем выбирается лучший вариант по каждому полю (`valid`, затем `confidence`).
-Для ВУ те же идеи применены к калибровке шаблона (монотонный отбор подписей), шаблонные зоны остаются запасом. Код: `docrec/anchors.py`, `docrec/ink.py`, `docrec/doctypes/sts.py`, `docrec/doctypes/sts_back.py`.
+Для ВУ те же идеи применены к калибровке шаблона (монотонный отбор подписей), шаблонные зоны остаются запасом. Код: `docrec/anchors.py`, `docrec/ink.py`, `docrec/doctypes/sts.py`, `docrec/doctypes/sts_back.py`, `docrec/makemodel.py` (марка/модель, цвет).
 Паспорт: `docrec/doctypes/passport.py` и `docrec/mrz.py`; там весь разворот прогоняется Paddle (длинная сторона до 1800 px) после выбора ориентации и выпрямления наклона,
 страницы делятся по позициям подписей, значения чистятся словарём (омоглифы, слова органа выдачи).
 
@@ -166,7 +169,7 @@ class MyDoc(DocType):
 - Tesseract плохо читает совсем мелкую латиницу (<~10 px) и сильный блик; при слабом результате включается Paddle-запас (если установлен).
 - Страница: печать поверх текста закрывает слова; наклон >10–15° не выпрямляется (поворот только кратный 90°).
 - Низкое разрешение (карточка < ~700 px по ширине) резко ухудшает цифры (`warnings: low_resolution`).
-- СТС: проверено на одном реальном (лицо и оборот) и синтетических снимках; суффикс модели (S↔5), длинные значения у обреза карточки и цвет читаются хуже, смотрите `confidence`/`partial`. Склейка лица и оборота в один результат не реализована. Код ГИБДД на бледных/зачёркнутых бланках может не читаться; СНИЛС-карта пока только опознаётся.
+- СТС: проверено на одном реальном (лицо и оборот) и синтетических снимках; суффикс модели (S↔5), длинные значения у обреза карточки и цвет читаются хуже, смотрите `confidence`/`partial`. Марка/модель: разбор рассчитан на вид «МАРКА 1234-XX» (КАМАЗ, ЛАДА, ГАЗ…); модели без цифрового номера (названия словами) читаются по старой схеме без сверки языков; неоднозначность S/5 разрешается по уверенности символов — смотрите `note`. Склейка лица и оборота в один результат не реализована. Код ГИБДД на бледных/зачёркнутых бланках может не читаться; СНИЛС-карта пока только опознаётся.
 - Паспорт: наклон выпрямляется поворотом (±10°), перспектива (снимок под углом) не исправляется; на снимках <~500 px по ширине серия/номер и мелкие слова органа выдачи читаются с ошибками (В↔Б, И↔П), при этом `confidence` ниже; МРЗ на нечётких/поддельных образцах может быть внутренне несогласован — тогда стоит `РАСХОЖДЕНИЕ`, а в поле остаётся печатное значение. Только разворот с фото и данными (страницы регистрации — нет). Проверено на небольшом числе реальных и синтетических снимков — не заменяет ручной контроль.
 - Не используйте для чужих документов без законного основания; обработка персональных данных регулируется законом.
 
@@ -194,6 +197,9 @@ Lightweight, fully offline recognition of Russian documents. CPU-only; no image 
 - **Vehicle registration certificate (STS)**, front side, portrait card photo: plate, VIN, make/model, type, category, year, chassis, body,
   colour, power (kW/hp), eco class, masses, PTS, STS number. Each field has `confidence` and `valid` (plate format with homoglyphs, 17-char VIN without I/O/Q,
   PTS, year range, colour/class vocabularies); values cut by the card edge are flagged `partial`.
+  **Make/model** is printed on two tightly stacked lines (Cyrillic and Latin): they are split by a projection profile, each is re-read in several crop variants
+  (Paddle + Tesseract), then cross-checked by transliteration (КАМАЗ↔KAMAZ) and voted on jointly, since the model part is the same on both lines — agreement fixes S/5, O/0, B/8, Z/2 confusions
+  (`make_model_ru`, `make_model_lat` and the combined `make_model` "КАМАЗ 5490-S5 / KAMAZ 5490-S5"). Colour is read from several windows with a dictionary match.
 - **STS, back side** (owner address, GIBDD code, issue date, STS number top and bottom): owner (Cyrillic/Latin), region, district, locality, street,
   house/building/apartment, special marks, GIBDD unit code, issue date (ISO), STS number (top and bottom copies must agree). The side is detected automatically (`extra.side`: `front`/`back`).
 - **Russian passport** (the photo-page spread, phone/web photos, any 0/90/180/270° rotation and ±10° skew): issuing authority, issue date, department code, name, sex,
@@ -209,7 +215,7 @@ Lightweight, fully offline recognition of Russian documents. CPU-only; no image 
 | Type | Status | Fields |
 |---|---|---|
 | Russian driver licence (2011+, front) | full | 18 fields, photo, per-cell categories |
-| STS (front) | full | 15 fields, validators, `partial` at the edge |
+| STS (front) | full | 15 fields + bilingual make/model, validators, `partial` at the edge |
 | Free-text page / contract | full | text, checksum-validated requisites |
 | STS (back) | full | 13 fields: address, GIBDD code, issue date, STS number |
 | Russian passport (spread) | full | 11 fields + MRZ, series/number from both pages, photo |
@@ -222,7 +228,7 @@ an **ordered list of labels**; labels are fuzzy-matched (homoglyph-aware), a dyn
 does not break the others — its position is interpolated), and value lines are assigned between neighbouring labels with a global shift estimate.
 For faint print the ink layers are separated: dark labels go to Tesseract, values (labels masked out, contrast boosted) go to Paddle; the best candidate per field wins
 (`valid`, then `confidence`). The driver licence uses the same idea for template calibration (monotone label selection); template zones stay as the fallback.
-Code: `docrec/anchors.py`, `docrec/ink.py`, `docrec/doctypes/sts.py`, `docrec/doctypes/sts_back.py`.
+Code: `docrec/anchors.py`, `docrec/ink.py`, `docrec/doctypes/sts.py`, `docrec/doctypes/sts_back.py`, `docrec/makemodel.py` (make/model, colour).
 Passport: `docrec/doctypes/passport.py` and `docrec/mrz.py`; the whole spread goes through Paddle (long side up to 1800 px) after orientation and skew correction,
 pages are split by label positions, values are cleaned with vocabularies (homoglyphs, issuer words).
 
@@ -277,7 +283,7 @@ up from the registry (see the example in the Russian section). Debug with `debug
 - Tesseract struggles with very small Latin text (<~10 px) and strong glare; the Paddle fallback (if installed) covers part of these cases.
 - Pages: stamps over text hide words; skew >10–15° is not corrected (only 90° steps).
 - Low resolution (card narrower than ~700 px) hurts digits (`warnings: low_resolution`).
-- STS: tested on one real (front and back) and synthetic photos; the model suffix (S↔5), long values cut at the card edge and colour are read less reliably — see `confidence`/`partial`. Merging front and back into one result is not implemented. The GIBDD code on faint/struck-through forms may be unreadable; the SNILS card is a classification stub.
+- STS: tested on one real (front and back) and synthetic photos; the model suffix (S↔5), long values cut at the card edge and colour are read less reliably — see `confidence`/`partial`. Make/model parsing expects the "MAKE 1234-XX" form (KAMAZ, LADA, GAZ…); names without a numeric model use the old single-line path without the language cross-check; S/5 ambiguity is resolved from per-character confidence — see `note`. Merging front and back into one result is not implemented. The GIBDD code on faint/struck-through forms may be unreadable; the SNILS card is a classification stub.
 - Passport: skew is fixed by rotation (±10°), perspective (shots at an angle) is not corrected; on photos narrower than ~500 px the series/number and small issuer words are read with errors (В↔Б, И↔П) with lower `confidence`; the MRZ of blurry/fake specimens may be internally inconsistent — then `MISMATCH` is reported and the printed value is kept. Photo-page spread only (no registration pages). Tested on a small set of real and synthetic images — not a substitute for manual review.
 - Do not process other people's documents without a legal basis; personal data processing is regulated by law.
 

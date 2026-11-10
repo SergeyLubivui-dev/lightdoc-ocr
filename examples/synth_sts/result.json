@@ -1,5 +1,5 @@
 {
-  "image": "samples/synth_sts1.jpg",
+  "image": "samples/synth_sts3.jpg",
   "image_size": [
     1200,
     1700
@@ -7,10 +7,10 @@
   "engine": "tess",
   "doc_type": "sts",
   "doc_type_title": "Свидетельство о регистрации ТС (СТС), лицевая сторона",
-  "confidence": 0.739,
+  "confidence": 0.55,
   "type_scores": {
-    "sts": 0.739,
-    "driver_license_rf": 0.258,
+    "sts": 0.55,
+    "driver_license_rf": 0.0,
     "sts_back": 0.0,
     "passport_rf": 0.0,
     "snils": 0.0
@@ -19,43 +19,45 @@
     "order": "TL,TR,BR,BL",
     "points": [
       [
-        284.3,
-        284.9
+        275.8,
+        314.1
       ],
       [
-        1024.3,
-        362.7
+        993.8,
+        364.3
       ],
       [
-        895.4,
-        1411.0
+        900.9,
+        1382.4
       ],
       [
-        192.4,
-        1337.2
+        226.0,
+        1335.1
       ]
     ]
   },
-  "corners_confidence": 0.984,
+  "corners_confidence": 0.979,
   "corners_method": "canny+snap",
   "card_rotation_applied": 0,
-  "warnings": [],
+  "warnings": [
+    "low_resolution: ширина карточки в исходнике ~698px (рекомендуется >= 900px), точность чтения упадёт"
+  ],
   "fields": {
     "curb_mass_kg": {
       "value": 1060,
-      "confidence": 0.994,
+      "confidence": 0.995,
       "valid": true,
       "note": "engine=paddle"
     },
     "max_mass_kg": {
       "value": 1560,
-      "confidence": 0.991,
+      "confidence": 0.997,
       "valid": true,
       "note": "engine=paddle"
     },
     "eco_class": {
       "value": "четвёртый",
-      "confidence": 0.997,
+      "confidence": 0.995,
       "valid": true,
       "note": "engine=paddle"
     },
@@ -64,51 +66,51 @@
         "kw": 64.0,
         "hp": 87.0
       },
-      "confidence": 0.997,
+      "confidence": 0.998,
       "valid": true,
       "note": "engine=paddle"
     },
     "color": {
       "value": "Серебристый",
-      "confidence": 0.984,
+      "confidence": 0.97,
       "valid": true,
       "note": "engine=paddle"
     },
     "body": {
       "value": "XTA219090E1234567",
-      "confidence": 0.998,
+      "confidence": 0.999,
       "valid": true,
       "note": "engine=paddle"
     },
     "chassis": {
       "value": "ОТСУТСТВУЕТ",
-      "confidence": 0.598,
+      "confidence": 0.589,
       "valid": true,
       "note": "engine=paddle"
     },
     "year": {
       "value": "2014",
-      "confidence": 0.998,
+      "confidence": 1.0,
       "valid": true,
       "note": "engine=paddle"
     },
     "category": {
       "value": "B",
-      "confidence": 0.934,
+      "confidence": 0.88,
       "valid": true,
       "note": "engine=paddle"
     },
     "vehicle_type": {
       "value": "Легковой седан",
-      "confidence": 0.958,
+      "confidence": 0.969,
       "valid": true,
       "note": "engine=paddle"
     },
     "make_model": {
-      "value": "ЛАДА 2190",
-      "confidence": 0.914,
+      "value": "КАМАЗ 5490-S5 / KAMAZ 5490-S5",
+      "confidence": 0.99,
       "valid": true,
-      "note": "engine=paddle"
+      "note": "две строки бланка (кириллица / латиница), сверены по транслитерации"
     },
     "vin": {
       "value": "XTA219090E1234567",
@@ -122,14 +124,24 @@
       "valid": true,
       "note": "A123BC77; engine=paddle"
     },
+    "make_model_ru": {
+      "value": "КАМАЗ 5490-S5",
+      "confidence": 0.99,
+      "valid": true
+    },
+    "make_model_lat": {
+      "value": "KAMAZ 5490-S5",
+      "confidence": 0.99,
+      "valid": true
+    },
     "pts": {
       "value": "77УТ123456",
-      "confidence": 0.836,
+      "confidence": 0.811,
       "valid": true
     },
     "sts_number": {
       "value": "77 12 123456",
-      "confidence": 0.961,
+      "confidence": 0.96,
       "valid": true
     }
   },
@@ -161,26 +173,42 @@
   "value_engines": [
     {
       "engine": "paddle",
-      "shift_rel": 0.317,
-      "cost": 0.744,
+      "shift_rel": 0.426,
+      "cost": 0.643,
       "labels_with_value": 14
     }
   ],
+  "make_model_check": {
+    "lines": 2,
+    "agree": true,
+    "y_lab": 0.322,
+    "block": [
+      331,
+      358
+    ],
+    "cuts": [
+      331,
+      348,
+      358
+    ],
+    "candidates": 30
+  },
   "checks": {
     "used_paddle": true,
     "sequence": {
-      "shift_rel": 0.317,
-      "cost": 0.744,
+      "shift_rel": 0.426,
+      "cost": 0.643,
       "labels_with_value": 14
     }
   },
   "timings_sec": {
-    "detect_card": 0.183,
+    "detect_card": 0.165,
     "warp": 0.0,
-    "ocr": 0.976,
-    "ocr_retype": 0.281,
-    "extract": 2.137,
-    "total": 3.658
+    "ocr": 0.602,
+    "ocr_portrait": 1.58,
+    "ocr_retype": 0.611,
+    "extract": 2.759,
+    "total": 5.818
   },
-  "peak_rss_mb": 429.3
+  "peak_rss_mb": 460.0
 }

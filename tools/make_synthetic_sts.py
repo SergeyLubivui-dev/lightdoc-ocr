@@ -9,7 +9,7 @@ FR = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 FM = "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
 W, H = 880, 1250
 GT_OVERRIDE = None
-GT = {"plate": "А123ВС77", "vin": "XTA219090E1234567", "make_model": "ЛАДА 2190", "vehicle_type": "Легковой седан", "category": "B", "year": "2014",
+GT = {"plate": "А123ВС77", "vin": "XTA219090E1234567", "make_model": "ЛАДА 2190 / LADA 2190", "make_model_ru": "ЛАДА 2190", "make_model_lat": "LADA 2190", "vehicle_type": "Легковой седан", "category": "B", "year": "2014",
       "chassis": "ОТСУТСТВУЕТ", "body": "XTA219090E1234567", "color": "Серебристый", "power": {"kw": 64.0, "hp": 87.0}, "eco_class": "четвёртый",
       "max_mass_kg": 1560, "curb_mass_kg": 1060, "pts": "77УТ123456", "sts_number": "77 12 123456"}
 # (ключ, подпись, y подписи, значение)
@@ -22,7 +22,8 @@ ROWS = [("plate", "Регистрационный знак", .215, "А123ВС77"
         ("curb_mass_kg", "Масса в снаряженном состоянии, кг", .7445, "1060"), ("temp_reg", "Срок временной регистрации", .784, "")]
 
 
-def card_image(seed=0, value_shift=0.014):
+def card_image(seed=0, value_shift=0.014, model=None, pitch=22):
+    """model=(ru, lat): две строки марки/модели; pitch — шаг строк в пикселях (17 = строки касаются друг друга, как на реальном бланке)."""
     rng = np.random.default_rng(seed)
     bg = np.zeros((H, W, 3), np.float32) + (236, 228, 238)       # светлая розово-сиреневая «гознаковая» бумага (BGR)
     bg += cv2.resize(rng.normal(0, 4, (H // 40, W // 40, 3)).astype(np.float32), (W, H), interpolation=cv2.INTER_CUBIC)
@@ -39,20 +40,21 @@ def card_image(seed=0, value_shift=0.014):
     txt(W * .12, H * .06, "СВИДЕТЕЛЬСТВО О РЕГИСТРАЦИИ ТС", 27, FB, (40, 40, 50))
     txt(W * .12, H * .095, "CERTIFICAT D'IMMATRICULATION", 15, FR, (70, 70, 80))
     for key, lab, y, val in ROWS:
+        if key == "make_model" and model: val = model[0] + "\n" + model[1]
         txt(W * .05, H * y - 14, lab, 17, FB, (45, 40, 50), wrap=W * .28)                  # печатные подписи: тёмные, мелкие
         if val:
             col = (172, 158, 148)                                                         # значения: бледные
             for k, line in enumerate(val.split("\n")):
                 t = line
                 if key in ("max_mass_kg", "curb_mass_kg"): t = line + " .. "
-                txt(W * .34, H * (y + value_shift) - 14 + 22 * k, t, 22, FM, col)
+                txt(W * .34, H * (y + value_shift) - 14 + (pitch if key == "make_model" else 22) * k, t, 22, FM, col)
     txt(W * .05, H * .80, "ПТС: 77УТ123456", 22, FM, (172, 158, 148))
     txt(W * .30, H * .915, "77 12 123456", 38, FB, (40, 40, 205))                         # красный номер
     a = np.array(img).astype(np.float32); a += rng.normal(0, 2, a.shape)
     return np.clip(a, 0, 255).astype(np.uint8)
 
 
-def scene(card, name, W_=1200, H_=1700, angle=6, tilt=0.05, scale=0.62, seed=0, bgc=(40, 44, 48)):
+def scene(card, name, W_=1200, H_=1700, angle=6, tilt=0.05, scale=0.62, seed=0, bgc=(40, 44, 48), gt=None):
     rng = np.random.default_rng(seed)
     bg = np.zeros((H_, W_, 3), np.float32) + bgc
     bg += cv2.resize(rng.normal(0, 1, (H_ // 8, W_ // 8, 3)).astype(np.float32), (W_, H_), interpolation=cv2.INTER_CUBIC) * 7 + rng.normal(0, 3, (H_, W_, 3))
@@ -66,9 +68,13 @@ def scene(card, name, W_=1200, H_=1700, angle=6, tilt=0.05, scale=0.62, seed=0, 
     m = cv2.GaussianBlur(cv2.warpPerspective(np.full((h, w), 255, np.uint8), M, (W_, H_)), (0, 0), 0.8)[..., None] / 255.0
     out = cv2.GaussianBlur(np.clip(bg * (1 - m) + warped * m, 0, 255), (0, 0), 0.9) + rng.normal(0, 2.5, (H_, W_, 3))
     cv2.imwrite(name, np.clip(out, 0, 255).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 80])
-    json.dump({"corners_TL_TR_BR_BL": dst.tolist(), "fields": GT_OVERRIDE or GT}, open(name.replace(".jpg", ".gt.json"), "w"), ensure_ascii=False)
+    json.dump({"corners_TL_TR_BR_BL": dst.tolist(), "fields": gt or GT_OVERRIDE or GT}, open(name.replace(".jpg", ".gt.json"), "w"), ensure_ascii=False)
 
 
 if __name__ == "__main__":
     scene(card_image(0, 0.014), "samples/synth_sts1.jpg", angle=6, seed=1)
     scene(card_image(1, 0.020), "samples/synth_sts2.jpg", angle=-9, tilt=0.09, scale=0.58, seed=2)   # другой сдвиг значений
+    # двуязычная марка/модель, строки вплотную (как на реальном бланке); суффикс S5 (буква+цифра) и 55 (две цифры — ложного «S» быть не должно)
+    for n, (ru, la, suf, a, tl) in enumerate([("КАМАЗ", "KAMAZ", "S5", 4, 0.06), ("КАМАЗ", "KAMAZ", "55", -5, 0.08)], 3):
+        g = dict(GT); g.update(make_model=f"{ru} 5490-{suf} / {la} 5490-{suf}", make_model_ru=f"{ru} 5490-{suf}", make_model_lat=f"{la} 5490-{suf}")
+        scene(card_image(n, 0.017, model=(f"{ru} 5490-{suf}", f"{la} 5490-{suf}"), pitch=17), f"samples/synth_sts{n}.jpg", angle=a, tilt=tl, scale=0.6, seed=n, gt=g)

@@ -157,8 +157,60 @@ def read_strips(img, paddle) -> dict:
     return res
 
 
+def is_mrz_like(t: str) -> bool:
+    """Строка машиночитаемой зоны: «<<», «…RUS930…», «P<RUS…» (в т.ч. с OCR-ошибками; без кириллицы)."""
+    u = re.sub(r"\s+", "", t.upper())
+    if u.count("<") >= 2: return True
+    if re.search(r"[A-Z0-9<]*RUS\d{5,}", u) or re.search(r"\d{8,10}RUS", u): return True
+    return bool(re.match(r"^P[<NIM1HV]{0,2}RUS[A-Z0-9<]", u) and len(u) >= 18 and not re.search(r"[А-ЯЁ]", u))
+
+
+_MRZ_TOKEN = re.compile(r"[A-Z0-9<]{10,}")
+
+
+def strip_mrz_text(text: str) -> str:
+    """Ни одно обычное поле не должно содержать МРЗ: режем значение на первом «МРЗ-подобном» токене (длинная латиница/цифры, «<», «RUS»+цифры)."""
+    toks = str(text).split(); out = []
+    for t in toks:
+        u = t.upper()
+        if "<" in u or (len(re.sub(r"\D", "", u)) >= 8) or (_MRZ_TOKEN.fullmatch(re.sub(r"[^A-Z0-9<]", "", u)) and re.search(r"\d", u) and len(u) >= 10) or re.search(r"RUS\d", u):
+            break
+        out.append(t)
+    return " ".join(out)
+
+
+_LABEL_FRAG = "ДАТАРОЖДЕНИЯМЕСТОПОЛ"
+
+
+def clean_place(text: str) -> str:
+    """Место рождения: убираем обрывки подписей слева («АТА» от «Дата», «ЖДЕНИЯ») и всё, что похоже на МРЗ."""
+    from .. import lexicon as LX
+    t = strip_mrz_text(text); toks = t.split()
+    while toks:
+        w = re.sub(r"[^А-ЯЁA-Za-z]", "", toks[0]).upper()
+        if w and len(w) <= 6 and w in _LABEL_FRAG and w not in ("Д", "Г", "С", "П") and not (toks[0] in LX.get("shared/place_words")):
+            toks.pop(0); continue
+        break
+    return " ".join(toks)
+
+
+def _mrz_block(mz, raw_lines):
+    """Отдельный JSON-блок МРЗ (не поле): сырые строки, разобранные значения, контрольные цифры, «личные данные» (4-я цифра серии, дата выдачи, код подразделения).
+    Используется только для сверки печатных полей."""
+    blk = {"found": bool(mz), "used_for": "cross-check only (не распознаваемое поле)", "raw_lines": list(raw_lines or [])}
+    if not mz: return blk
+    chk = mz.get("checks") or {}
+    blk["parsed"] = {k: mz.get(k) for k in ("surname", "name", "patronymic", "sex", "birth_date", "issue_date", "dept_code", "series", "number") if mz.get(k) is not None}
+    blk["latin"] = {k: mz.get(k) for k in ("surname_lat", "name_lat", "patronymic_lat") if mz.get(k)}
+    blk["personal_data"] = {"series_4th_digit": (mz.get("series") or "").replace(" ", "")[3:4] or None, "issue_date": mz.get("issue_date"), "dept_code": mz.get("dept_code")}
+    blk["checks"] = {k: bool(v) for k, v in chk.items()}
+    blk["checks_valid"] = bool(chk.get("check_doc") and chk.get("check_birth"))
+    blk["line1_found"] = mz.get("line1_found"); blk["line2_found"] = mz.get("line2_found")
+    return blk
+
+
 def mrz_candidates(lines) -> list[str]:
-    ml = [l for l in lines if l.cy > 0.78 and (l.text.count("<") >= 2 or "RUS" in l.text.upper() or l.text.upper().startswith("PN"))]
+    ml = [l for l in lines if l.cy > 0.55 and (is_mrz_like(l.text) or (l.cy > 0.78 and (l.text.count("<") >= 2 or "RUS" in l.text.upper() or l.text.upper().startswith("PN"))))]
     ml = sorted(ml, key=lambda l: (round(l.cy, 2), l.x0))
     rows, out = [], []
     for l in ml:
@@ -236,6 +288,11 @@ def _lexicon_pass(F, checks):
     Фамилии НЕ подгоняем (редкие/нестандартные фамилии): только повышаем уверенность, если фамилия есть в словаре, иначе — пометка «возможно …»."""
     from .. import lexicon as LX
     def mrz_ok(k): return checks.get(k) in ("agree", "corrected")
+    f0 = F.get("patronymic")
+    if f0 is not None and f0.value:    # «ВЛАДИМИРОВ ИЧ» -> «ВЛАДИМИРОВИЧ»: хвост отчества отделился пробелом
+        ws = str(f0.value).split()
+        if len(ws) == 2 and ws[1] in ("ИЧ", "ВИЧ", "ВНА", "НА", "ИЧНА", "ЫЧ", "ЧНА", "ОВНА", "ЕВНА") and len(ws[0]) >= 4:
+            f0.note = ((f0.note + "; ") if f0.note else "") + f"склеено «{ws[0]} {ws[1]}» → «{ws[0] + ws[1]}»"; f0.value = ws[0] + ws[1]
     for key, lex in (("name", "shared/first_names"), ("patronymic", "shared/patronymics")):
         f = F.get(key)
         if f is None or not f.value or mrz_ok(key) or (f.note or "").startswith("из МРЗ"): continue
@@ -324,7 +381,7 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
         if ups: split = max(0.40, min(0.50, max(ups) + 0.07))
     notes["page_split"] = round(float(split), 3)
     mrz_lines = mrz_candidates(lines)
-    mrz_y = min([l.cy for l in lines if l.cy > 0.78 and (l.text.count("<") >= 2 or "RUS" in l.text.upper())], default=1.0)
+    mrz_y = min([l.cy for l in lines if l.cy > 0.55 and is_mrz_like(l.text)] + [l.cy for l in lines if l.cy > 0.78 and (l.text.count("<") >= 2 or "RUS" in l.text.upper())], default=1.0)
     # ---------- МРЗ
     mz = MRZ.parse(mrz_lines) if mrz_lines else None
     if mz and not (mz.get("line1_found") or mz.get("line2_found")): mz = None
@@ -364,7 +421,7 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
     for l in low:
         if l.x0 > 0.9 or l.x1 < 0.30: continue
         t = l.text
-        if is_label(l): continue
+        if is_label(l) or is_mrz_like(l.text): continue
         tt = re.sub(r"\b(Пол|Дата|рождения|рожд|Место|Фамилия|Имя|Отчество)\b\.?", " ", t, flags=re.I)
         vals.append((l, tt))
     # дата рождения, пол
@@ -427,7 +484,7 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
                 pass
     if place:
         place.sort(key=lambda p: p[1].cy)
-        txt = clean_cyr(" ".join(t for t, _ in place))
+        txt = clean_place(clean_cyr(" ".join(t for t, _ in place)))
         F["birth_place"] = Field(txt, float(np.mean([l.score for _, l in place])), "printed")
     if bd: F["birth_date"] = Field(bd[0], bd[1].score, "printed", valid=valid_date(bd[0], 1850) is not None)
     if sexl: F["sex"] = Field(sexl[0], sexl[1].score, "printed", valid=True)
@@ -453,6 +510,7 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
             cur = F.get(key)
             if not mval: return
             if cur is None:
+                if key in ("surname", "name", "patronymic") and (not mz_ok or not re.fullmatch(r"[А-ЯЁ\- ]{2,}", str(mval))): return   # МРЗ с OCR-ошибками имён в поле не подставляем
                 F[key] = Field(mval, base_conf * 0.9, "из МРЗ (в печатной части не прочитано)", valid=None); checks[key] = "mrz_only"; return
             a, b = str(cur.value), str(mval)
             same = (a == b) if kind == "exact" else (sim(a, b) >= 0.75 or (len(b) >= 4 and sim(a[:len(b) + 1], b) >= 0.8))
@@ -514,7 +572,11 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
         if abs((idt.year % 100) - yy) > 1: F["series"].note = ((F["series"].note or "") + f"; год в серии ({yy:02d}) далёк от года выдачи").strip("; ")
     # финальный confidence: страховка по OCR
     for f in F.values(): f.confidence = float(max(0.0, min(1.0, f.confidence)))
-    extra = {"mrz": ({k: v for k, v in mz.items()} if mz else None), "mrz_cross_check": checks, "orientation": notes, "series_number_strips": strips}
+    for k_, f_ in F.items():     # ни одно обычное поле не содержит МРЗ
+        if isinstance(f_.value, str) and k_ not in ("series", "number", "dept_code", "issue_date", "birth_date"):
+            cl = strip_mrz_text(f_.value)
+            if cl != f_.value: f_.note = ((f_.note + "; ") if f_.note else "") + "отрезан текст МРЗ из значения"; f_.value = cl
+    extra = {"mrz": _mrz_block(mz, mrz_lines), "mrz_cross_check": checks, "orientation": notes, "series_number_strips": strips}
     # фото: лицо -> рамка фотографии
     photo_box = None
     f = pipe._detect_face(m)
@@ -522,7 +584,7 @@ def read_passport(pipe, img: np.ndarray) -> dict | None:
         fx, fy, fw, fh = [float(v) for v in f[:4]]
         x0, x1 = fx - 0.55 * fw, fx + 1.55 * fw; y0, y1 = fy - 0.75 * fh, fy + 1.95 * fh
         photo_box = [max(0, int(x0)), max(0, int(y0)), min(W, int(x1)), min(H, int(y1))]
-        extra["photo"] = {"face_detected": True, "face_confidence": round(float(f[-1]), 3)}
+        extra["photo"] = {"label_ru": "Фото владельца", "face_detected": True, "face_confidence": round(float(f[-1]), 3)}
     else:
-        extra["photo"] = {"face_detected": False}
+        extra["photo"] = {"label_ru": "Фото владельца", "face_detected": False}
     return {"fields": F, "extra": extra, "image": m, "photo_box": photo_box, "lines": lines, "angle": angle}

@@ -8,6 +8,7 @@ FB = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 FR = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 FM = "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
 W, H = 880, 1250
+GT_OVERRIDE = None
 GT = {"plate": "А123ВС77", "vin": "XTA219090E1234567", "make_model": "ЛАДА 2190", "vehicle_type": "Легковой седан", "category": "B", "year": "2014",
       "chassis": "ОТСУТСТВУЕТ", "body": "XTA219090E1234567", "color": "Серебристый", "power": {"kw": 64.0, "hp": 87.0}, "eco_class": "четвёртый",
       "max_mass_kg": 1560, "curb_mass_kg": 1060, "pts": "77УТ123456", "sts_number": "77 12 123456"}
@@ -65,7 +66,7 @@ def scene(card, name, W_=1200, H_=1700, angle=6, tilt=0.05, scale=0.62, seed=0, 
     m = cv2.GaussianBlur(cv2.warpPerspective(np.full((h, w), 255, np.uint8), M, (W_, H_)), (0, 0), 0.8)[..., None] / 255.0
     out = cv2.GaussianBlur(np.clip(bg * (1 - m) + warped * m, 0, 255), (0, 0), 0.9) + rng.normal(0, 2.5, (H_, W_, 3))
     cv2.imwrite(name, np.clip(out, 0, 255).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 80])
-    json.dump({"corners_TL_TR_BR_BL": dst.tolist(), "fields": GT}, open(name.replace(".jpg", ".gt.json"), "w"), ensure_ascii=False)
+    json.dump({"corners_TL_TR_BR_BL": dst.tolist(), "fields": GT_OVERRIDE or GT}, open(name.replace(".jpg", ".gt.json"), "w"), ensure_ascii=False)
 
 
 if __name__ == "__main__":

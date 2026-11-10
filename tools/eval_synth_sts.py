@@ -1,11 +1,11 @@
-"""Оценка СТС на синтетических сценах (вымышленные данные). make_model: допускается кириллица или латиница (две строки на бланке)."""
+"""Оценка СТС (лицо и оборот) на синтетических сценах (вымышленные данные). make_model: допускается кириллица или латиница (две строки на бланке)."""
 import sys, json, os, glob, warnings
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from docrec import DocumentPipeline
 p = DocumentPipeline(threads=int(os.environ.get("THREADS", "4")))
 tot = ok_all = 0
-for f in sorted(glob.glob("samples/synth_sts[0-9].jpg")):
+for f in sorted(glob.glob("samples/synth_sts[0-9].jpg") + glob.glob("samples/synth_sts_back[0-9].jpg")):
     r = p.process(f, f"out/eval_{os.path.basename(f)[:-4]}")
     gt = json.load(open(f.replace(".jpg", ".gt.json")))["fields"]
     bad = {}

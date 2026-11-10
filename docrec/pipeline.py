@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, time, os
+import json, re, time, os
 from .sysutil import peak_rss_mb
 from pathlib import Path
 import cv2
@@ -91,7 +91,15 @@ class DocumentPipeline:
         img = imread(path)
         if self.mode == "page":
             return self._process_page(img, path, out, t0, reason="mode=page")
+        if self.mode == "passport":
+            r = self._process_passport(img, path, out, t0)
+            if r is not None: return r
         res = self._process_card(img, path, out, t0, allow_page=(self.mode == "auto"))
+        # разворот паспорта читается по всему кадру (рамка карточки у него ненадёжна): пробуем, если тип не опознан/слабый/страница с признаками паспорта
+        if self.mode == "auto" and (res["doc_type"] in ("passport_rf", "unknown") or res["confidence"] < 0.5 or
+                                    (res["doc_type"] == "free_text" and self._passport_cues(res.get("text", "")) >= 2)):
+            r = self._process_passport(img, path, out, t0)
+            if r is not None: return r
         if res["doc_type"] == "free_text":
             return res
         # слабый результат Tesseract (мелкая латиница, шумный фон) -> добираем PaddleOCR, если он установлен
@@ -103,6 +111,46 @@ class DocumentPipeline:
             res = self._merge(res, alt, out)
         if res["doc_type"] == "unknown" and self.mode == "auto":
             return self._process_page(img, path, out, t0, reason="auto: тип карточки не опознан — читаю как произвольный текст")
+        return res
+
+    @staticmethod
+    def _passport_cues(text: str) -> int:
+        t = text.upper(); pats = [r"УФМС", r"\bМВД\b", r"ПАСПОРТ\s*ВЫДАН", r"КОД\s*ПОДРАЗДЕЛЕНИЯ", r"\b(?:МУЖ|ЖЕН)\.", r"\b\d{3}\s*[-–—]\s*\d{3}\b", r"PNRUS", r"МЕСТО\s*РОЖДЕНИЯ"]
+        return sum(bool(re.search(p, t)) for p in pats)
+
+    def _process_passport(self, img, path, out, t0):
+        from .doctypes.passport import read_passport, PassportRF
+        T = {}; t = time.perf_counter()
+        r = read_passport(self, img)
+        T["passport_read"] = time.perf_counter() - t
+        if r is None: return None
+        m = r["image"]; H, W = m.shape[:2]; H0, W0 = img.shape[:2]
+        F = r["fields"]
+        exp = PassportRF.expected_fields
+        res = {"image": str(path), "image_size": [W0, H0], "engine": "paddle(+tesseract)", "doc_type": "passport_rf",
+               "doc_type_title": PassportRF.title_ru, "confidence": round(min(1.0, r["extra"]["orientation"]["cues"] / 6), 3),
+               "route": "passport: разворот читается по всему кадру (без поиска рамки), PaddleOCR + МРЗ + полосы серии/номера",
+               "warnings": [], "fields": {k: v.as_dict() for k, v in F.items()}, "files": {}}
+        res.update({k: v for k, v in r["extra"].items()})
+        if min(W0, H0) < 700: res["warnings"].append(f"low_resolution: {W0}x{H0}px — мелкие подписи и МРЗ читаются плохо (рекомендуется ≥1000 px по ширине)")
+        miss = [k for k in exp if k not in F]
+        if miss: res["warnings"].append("not_found: " + ", ".join(miss))
+        for stale in ("debug_card.jpg", "photo.jpg"):   # артефакты прерванного карточного прохода
+            try: (out / stale).unlink()
+            except OSError: pass
+        imwrite(out / "card.jpg", m); res["files"]["card"] = str(out / "card.jpg")
+        if r["photo_box"]:
+            x0, y0, x1, y1 = r["photo_box"]; imwrite(out / "photo.jpg", m[y0:y1, x0:x1]); res["files"]["photo"] = str(out / "photo.jpg")
+            res["photo"]["box_px"] = r["photo_box"]
+        dbg = m.copy(); th = max(1, int(max(W, H) / 900))
+        for l in r["lines"]:
+            cv2.rectangle(dbg, (int(l.x0 * W), int(l.y0 * H)), (int(l.x1 * W), int(l.y1 * H)), (255, 0, 0), th)
+        imwrite(out / "debug.jpg", dbg); res["files"]["debug"] = str(out / "debug.jpg")
+        T["total"] = time.perf_counter() - t0
+        res["timings_sec"] = {k: round(v, 3) for k, v in T.items()}
+        res["peak_rss_mb"] = round(peak_rss_mb(), 1)
+        with open(out / "result.json", "w", encoding="utf-8") as f: json.dump(res, f, ensure_ascii=False, indent=2, default=str)
+        res["files"]["json"] = str(out / "result.json")
         return res
 
     def _weak(self, res) -> bool:
@@ -176,6 +224,18 @@ class DocumentPipeline:
                 T["ocr_rot180"] = T.get("ocr_rot180", 0) + time.perf_counter() - t_
                 if sc2[b2] > sc_[b_]:
                     c, ls, b_, sc_, rot = c2, ls2, b2, sc2, 180
+            if sc_[b_] < 0.6:
+                # возможно, документ портретный (СТС, паспорт): пробуем портретное выпрямление, обе ориентации
+                try:
+                    c3 = warp_card(img, q, (704, 1000))
+                    for rr, cc_ in ((0, c3), (180, cv2.rotate(c3, cv2.ROTATE_180))):
+                        t_ = time.perf_counter(); l3 = self.ocr(cc_); b3, s3 = self._classify(l3)
+                        T["ocr_portrait"] = T.get("ocr_portrait", 0) + time.perf_counter() - t_
+                        if s3[b3] > sc_[b_] + 0.1 and REGISTRY[b3].card_size[1] > REGISTRY[b3].card_size[0]:
+                            c, ls, b_, sc_, rot = cc_, l3, b3, s3, rr
+                        if s3[b3] >= 0.6: break
+                except Exception:
+                    pass
             return c, ls, b_, sc_, rot
 
         card, lines, best, scores, rotation = attempt(quad)

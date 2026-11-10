@@ -1,0 +1,159 @@
+{
+  "image": "samples/synth_sts_back1.jpg",
+  "image_size": [
+    1200,
+    1700
+  ],
+  "engine": "tess",
+  "doc_type": "sts_back",
+  "doc_type_title": "Свидетельство о регистрации ТС (СТС), оборотная сторона",
+  "confidence": 1.0,
+  "type_scores": {
+    "sts_back": 1.0,
+    "driver_license_rf": 0.445,
+    "passport_rf": 0.19,
+    "sts": 0.0,
+    "snils": 0.0
+  },
+  "corners": {
+    "order": "TL,TR,BR,BL",
+    "points": [
+      [
+        274.6,
+        290.4
+      ],
+      [
+        1015.7,
+        355.5
+      ],
+      [
+        905.1,
+        1405.8
+      ],
+      [
+        201.0,
+        1344.2
+      ]
+    ]
+  },
+  "corners_confidence": 0.984,
+  "corners_method": "canny+snap",
+  "card_rotation_applied": 0,
+  "warnings": [],
+  "fields": {
+    "owner": {
+      "value": "ООО\"Ромашка\"",
+      "confidence": 0.919
+    },
+    "owner_lat": {
+      "value": "OOO\"ROMASHKA\"",
+      "confidence": 0.895
+    },
+    "region": {
+      "value": "Тверская область",
+      "confidence": 0.963,
+      "valid": true
+    },
+    "district": {
+      "value": "р-н Кимрский",
+      "confidence": 0.915,
+      "valid": true
+    },
+    "locality": {
+      "value": "г Кимры",
+      "confidence": 0.894,
+      "valid": true
+    },
+    "street": {
+      "value": "ул Садовая",
+      "confidence": 0.935,
+      "valid": true
+    },
+    "house": {
+      "value": "12",
+      "confidence": 1.0,
+      "valid": true,
+      "note": "из слоя значений (бледная печать)"
+    },
+    "building": {
+      "value": "",
+      "confidence": 0.8,
+      "valid": true,
+      "note": "пусто"
+    },
+    "apartment": {
+      "value": "",
+      "confidence": 0.8,
+      "valid": true,
+      "note": "пусто"
+    },
+    "special_marks": {
+      "value": "",
+      "confidence": 0.8,
+      "valid": true,
+      "note": "пусто"
+    },
+    "gibdd_code": {
+      "value": "1123456",
+      "confidence": 0.999,
+      "valid": true,
+      "note": "зачёркнут линией на бланке"
+    },
+    "issue_date": {
+      "value": "2020-05-15",
+      "confidence": 0.933,
+      "valid": true,
+      "note": "15 мая 2020"
+    },
+    "sts_number_top": {
+      "value": "77 30 123456",
+      "confidence": 0.951,
+      "valid": true,
+      "note": "красный"
+    },
+    "sts_number_bottom": {
+      "value": "77 30 123456",
+      "confidence": 0.955,
+      "valid": true,
+      "note": "чёрный, внизу"
+    },
+    "sts_number": {
+      "value": "77 30 123456",
+      "confidence": 0.983,
+      "valid": true,
+      "note": "верх = низ"
+    }
+  },
+  "files": {
+    "card": "examples/synth_sts_back/card.jpg",
+    "debug": "examples/synth_sts_back/debug.jpg",
+    "debug_card": "examples/synth_sts_back/debug_card.jpg"
+  },
+  "side": "back",
+  "labels": {
+    "found": [
+      "owner",
+      "region",
+      "district",
+      "locality",
+      "street",
+      "house",
+      "marks"
+    ],
+    "missing": []
+  },
+  "sequence": {
+    "shift_rel": 0.291,
+    "cost": 0.137,
+    "labels_with_value": 5
+  },
+  "timings_sec": {
+    "detect_card": 0.17,
+    "warp": 0.0,
+    "ocr": 0.486,
+    "ocr_retype": 0.483,
+    "extract": 1.284,
+    "total": 2.491
+  },
+  "peak_rss_mb": 372.0
+}

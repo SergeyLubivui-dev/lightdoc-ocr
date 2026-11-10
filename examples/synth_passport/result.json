@@ -1,0 +1,145 @@
+{
+  "image": "samples/synth_pass1.jpg",
+  "image_size": [
+    1400,
+    1900
+  ],
+  "engine": "paddle(+tesseract)",
+  "doc_type": "passport_rf",
+  "doc_type_title": "Паспорт гражданина РФ (разворот с фото)",
+  "confidence": 1.0,
+  "route": "passport: разворот читается по всему кадру (без поиска рамки), PaddleOCR + МРЗ + полосы серии/номера",
+  "warnings": [],
+  "fields": {
+    "dept_code": {
+      "value": "690-001",
+      "confidence": 1.0,
+      "valid": true,
+      "note": "печать = МРЗ"
+    },
+    "issue_date": {
+      "value": "12.03.2015",
+      "confidence": 1.0,
+      "valid": true,
+      "note": "печать = МРЗ"
+    },
+    "issued_by": {
+      "value": "ОТДЕЛОМ УФМС РОССИИ ПО ТВЕРСКОЙ ОБЛАСТИ В ГОР. ТВЕРИ",
+      "confidence": 0.984,
+      "note": "printed"
+    },
+    "surname": {
+      "value": "ТЕСТОВ",
+      "confidence": 0.897,
+      "note": "печать = МРЗ"
+    },
+    "name": {
+      "value": "ИВАН",
+      "confidence": 0.9,
+      "note": "исправлено по МРЗ (печать читалась как 'ИБАН')"
+    },
+    "patronymic": {
+      "value": "ПЕТРОВИЧ",
+      "confidence": 0.997,
+      "note": "печать = МРЗ"
+    },
+    "birth_place": {
+      "value": "ГОР. ТВЕРЬ",
+      "confidence": 0.966,
+      "note": "printed"
+    },
+    "birth_date": {
+      "value": "15.06.1985",
+      "confidence": 1.0,
+      "valid": true,
+      "note": "печать = МРЗ"
+    },
+    "sex": {
+      "value": "МУЖ.",
+      "confidence": 0.985,
+      "valid": true,
+      "note": "печать = МРЗ"
+    },
+    "series": {
+      "value": "28 15",
+      "confidence": 0.887,
+      "valid": true,
+      "note": "только одна полоса прочитана; выбрана top (совпала с МРЗ); = МРЗ"
+    },
+    "number": {
+      "value": "123456",
+      "confidence": 0.887,
+      "valid": true,
+      "note": "только одна полоса прочитана; выбрана top (совпала с МРЗ); = МРЗ"
+    }
+  },
+  "files": {
+    "card": "examples/synth_passport/card.jpg",
+    "photo": "examples/synth_passport/photo.jpg",
+    "debug": "examples/synth_passport/debug.jpg"
+  },
+  "mrz": {
+    "line1_found": true,
+    "line2_found": true,
+    "surname_lat": "TESTOV",
+    "surname": "ТЕСТОВ",
+    "name": "ИВАН",
+    "patronymic": "ПЕТРОВИЧ",
+    "name_lat": "IVAN",
+    "patronymic_lat": "PETROVI3",
+    "line1": "PNRUSTESTOV<<IVAN<PETROVI3<<<<<<<<<<<<<<<<<<",
+    "line2": "2811234564RUS8506151M<<<<<<<5150312690001<10",
+    "checks": {
+      "check_doc": true,
+      "check_birth": true,
+      "check_opt": true,
+      "check_all": true
+    },
+    "sex": "МУЖ.",
+    "birth_date": "15.06.1985",
+    "issue_date": "12.03.2015",
+    "dept_code": "690-001",
+    "series3": "281",
+    "number": "123456",
+    "series": "28 15"
+  },
+  "mrz_cross_check": {
+    "birth_date": "agree",
+    "issue_date": "agree",
+    "dept_code": "agree",
+    "sex": "agree",
+    "surname": "agree",
+    "name": "corrected",
+    "patronymic": "agree",
+    "series_number": "agree"
+  },
+  "orientation": {
+    "scale": 1.0,
+    "rotation_ccw": 0,
+    "deskew_deg": -4.0,
+    "cues": 14,
+    "lower_value_lines": 3
+  },
+  "series_number_strips": {
+    "top": {
+      "series": "28 15",
+      "number": "123456",
+      "score": 0.98515
+    }
+  },
+  "photo": {
+    "face_detected": true,
+    "face_confidence": 0.926,
+    "box_px": [
+      241,
+      913,
+      458,
+      1282
+    ]
+  },
+  "timings_sec": {
+    "passport_read": 2.361,
+    "total": 10.015
+  },
+  "peak_rss_mb": 601.9
+}

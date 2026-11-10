@@ -125,7 +125,7 @@ class STS(DocType):
         return cand, diag
 
     def extract(self, card, lines, rec=None, cell=None, ocr=None, paddle=None) -> Extraction:
-        ex = Extraction(photo_zone=None); F = ex.fields
+        ex = Extraction(photo_zone=None); F = ex.fields; ex.extra["side"] = "front"
         H, W = card.shape[:2]
         Limg, Vimg = split_ink(card)
         # 1) подписи: слой подписей, монотонное сопоставление
@@ -195,7 +195,7 @@ class STS(DocType):
         return ex
 
     def _pts_and_number(self, F, pool, llines, cands_all, paddle, Vimg, H):
-        # ПТС: строка внизу, «ПТС: 77УТ123456»
+        # ПТС: строка внизу, «ПТС: 77АА123456»
         cands = []
         for l in pool:
             if l.cy < 0.74: continue
@@ -215,7 +215,7 @@ class STS(DocType):
                     if v: cands.append((ok, l.score, v))
         if cands:
             ok, sc, v = max(cands); F["pts"] = Field(v, sc * (1.0 if ok else 0.6), None, valid=ok)
-        # номер СТС (красный, внизу): «77 12 123456» — склеиваем токены одной строки y>0.85
+        # номер СТС (красный, внизу): «99 00 123456» — склеиваем токены одной строки y>0.85
         for src in (llines, pool):
             row = sorted([l for l in src if l.cy > 0.86], key=lambda l: (round(l.cy, 2), l.x0))
             txt = " ".join(l.text for l in row)

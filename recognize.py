@@ -12,7 +12,7 @@ def main():
     ap.add_argument("--threads", type=int, default=0, help="потоков onnxruntime (0 = авто)")
     ap.add_argument("--engine", choices=["tess", "paddle"], default="tess", help="tess = Tesseract 5 best (по умолчанию), paddle = RapidOCR PP-OCRv5 (нужен rapidocr)")
     ap.add_argument("--fast", action="store_true", help="tessdata_fast (быстрее, чуть менее точно)")
-    ap.add_argument("--mode", choices=["auto", "card", "page"], default="auto", help="card = удостоверение, page = лист/договор (текст+реквизиты), auto = сам решает")
+    ap.add_argument("--mode", choices=["auto", "card", "page", "passport"], default="auto", help="card = удостоверение, page = лист/договор (текст+реквизиты), passport = паспорт РФ, auto = сам решает")
     ap.add_argument("--quiet", action="store_true", help="не печатать JSON в stdout")
     a = ap.parse_args()
     res = DocumentPipeline(threads=a.threads, engine=a.engine, fast=a.fast, mode=a.mode).process(a.image, a.out)

@@ -36,7 +36,7 @@ class OCREngine:
             params["EngineConfig.onnxruntime.inter_op_num_threads"] = 1
         self.engine = RapidOCR(params=params)
 
-    def __call__(self, card_bgr: np.ndarray) -> list[Line]:
+    def __call__(self, card_bgr: np.ndarray, merge: bool = True) -> list[Line]:
         H, W = card_bgr.shape[:2]
         r = self.engine(card_bgr, use_det=True, use_cls=False, use_rec=True)  # явно: recognize_crop меняет режим движка
         lines: list[Line] = []
@@ -50,7 +50,7 @@ class OCREngine:
             ln.cx, ln.cy = (ln.x0 + ln.x1) / 2, (ln.y0 + ln.y1) / 2
             if ln.text:
                 lines.append(ln)
-        return merge_row_fragments(lines)
+        return merge_row_fragments(lines) if merge else sorted(lines, key=lambda l: (l.cy, l.x0))
 
     def recognize_crop(self, crop_bgr: np.ndarray):
         """Только распознавание (без детектора) для готового кропа одной строки. -> (text, score)"""

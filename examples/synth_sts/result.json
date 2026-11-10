@@ -11,6 +11,7 @@
   "type_scores": {
     "sts": 0.739,
     "driver_license_rf": 0.258,
+    "sts_back": 0.0,
     "passport_rf": 0.0,
     "snils": 0.0
   },
@@ -137,6 +138,7 @@
     "debug": "examples/synth_sts/debug.jpg",
     "debug_card": "examples/synth_sts/debug_card.jpg"
   },
+  "side": "front",
   "labels": {
     "found": [
       "plate",
@@ -173,12 +175,12 @@
     }
   },
   "timings_sec": {
-    "detect_card": 0.139,
+    "detect_card": 0.183,
     "warp": 0.0,
-    "ocr": 0.709,
-    "ocr_retype": 0.251,
-    "extract": 1.611,
-    "total": 2.771
+    "ocr": 0.976,
+    "ocr_retype": 0.281,
+    "extract": 2.137,
+    "total": 3.658
   },
-  "peak_rss_mb": 429.1
+  "peak_rss_mb": 429.3
 }

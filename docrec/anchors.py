@@ -99,7 +99,7 @@ def label_positions(specs: list[LabelSpec], found: dict[str, tuple[Line, float]]
 
 
 def assign_values(specs: list[LabelSpec], pos: list[tuple[float, bool]], values: list[Line],
-                  win=(-0.3, 1.15), skip_label=0.9, skip_value=0.55) -> tuple[dict[str, list[Line]], dict]:
+                  win=(-0.3, 1.15), skip_label=0.9, skip_value=0.55, multi_gap=0.03) -> tuple[dict[str, list[Line]], dict]:
     """Монотонное выравнивание подписей и строк значений. Возвращает {key: [строки значения]} и диагностику (сдвиг)."""
     vals = sorted(values, key=lambda v: (v.cy, v.x0))
     L, N = len(specs), len(vals)
@@ -125,7 +125,7 @@ def assign_values(specs: list[LabelSpec], pos: list[tuple[float, bool]], values:
                 if i < L and j < N:
                     for k in range(1, specs[i].multi + 1):
                         if j + k > N: break
-                        if k > 1 and abs(vals[j + k - 1].cy - vals[j].cy) > 0.03: break
+                        if k > 1 and abs(vals[j + k - 1].cy - vals[j].cy) > multi_gap: break
                         cc = c + cost(i, j) + 0.12 * (k - 1)
                         if cc < f[i + 1, j + k]: f[i + 1, j + k] = cc; bk[(i + 1, j + k)] = (i, j, k)
         i, j = L, N; assign = {}

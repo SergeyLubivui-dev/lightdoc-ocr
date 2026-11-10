@@ -55,7 +55,9 @@ class TessEngine:
             while it:
                 if it.IsAtBeginningOf(tr.RIL.BLOCK): block_idx += 1
                 if it.IsAtBeginningOf(tr.RIL.TEXTLINE): line_idx += 1
-                t = it.GetUTF8Text(tr.RIL.WORD); b = it.BoundingBox(tr.RIL.WORD); c = it.Confidence(tr.RIL.WORD)
+                try: t = it.GetUTF8Text(tr.RIL.WORD)
+                except RuntimeError: t = None
+                b = it.BoundingBox(tr.RIL.WORD); c = it.Confidence(tr.RIL.WORD)
                 if t and t.strip() and b:
                     words.append((t.strip(), c / 100.0, b[0], b[1], b[2], b[3], line_idx, block_idx))
                 if not it.Next(tr.RIL.WORD): break

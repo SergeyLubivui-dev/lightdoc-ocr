@@ -67,14 +67,14 @@ def _norm_temp(raw: str):
 NORMALIZERS = {
     "plate": lambda t: (lambda r: (r[0], r[1], r[2]))(V.norm_plate(t)),
     "vin": V.norm_vin,
-    "vehicle_type": lambda t: (*V.norm_vehicle_type(t), None),
+    "vehicle_type": V.norm_vehicle_type_lex,
     "category": lambda t: (lambda r: ((f"{r[0]['category'] or ''}/{r[0]['class'] or ''}".strip("/") if r[0] else None), r[1], None))(V.norm_category(t)),
     "year": lambda t: (*V.norm_year(t), None),
     "chassis": lambda t: (*_norm_ident(t), None),
     "body": lambda t: (*_norm_ident(t), None),
-    "color": lambda t: (*V.norm_color(t), None),
+    "color": V.norm_color_lex,
     "power": V.norm_power,
-    "eco_class": lambda t: (*V.norm_eco(t), None),
+    "eco_class": V.norm_eco_lex,
     "max_mass_kg": lambda t: (*V.norm_mass(t), None),
     "curb_mass_kg": lambda t: (*V.norm_mass(t), None),
     "make_model": lambda t: (lambda r: (*r, "суффикс модели после дефиса мог быть прочитан неточно (S↔5)" if r[0] and re.search(r"-\d{2}$", r[0]) else None))(_norm_make(t)),
@@ -192,7 +192,7 @@ class STS(DocType):
         if paddle is not None and ("color" not in F or F["color"].confidence < 0.8):
             try:
                 ic = [s_.key for s_ in SPECS].index("color"); sh = (engines[-1][1].get("shift_rel", 0.4) if engines else 0.4)
-                cr = MM.read_color(card, Vimg, pos[ic][0] + sh * 0.04, paddle, V.norm_color)
+                cr = MM.read_color(card, Vimg, pos[ic][0] + sh * 0.04, paddle, V.norm_color_lex)
             except Exception as e:
                 cr = None; ex.extra["color_error"] = repr(e)[:120]
             if cr and ("color" not in F or cr["conf"] > F["color"].confidence):
@@ -200,7 +200,7 @@ class STS(DocType):
         # 4b) марка/модель: две плотные строки (кириллица + латиница) — отдельный разрез, перечитывание и сверка строк (makemodel.py)
         if paddle is not None:
             try:
-                mm = MM.read_make_model(card, Vimg, pos[[s_.key for s_ in SPECS].index("make_model")][0], paddle, cell)
+                _yl = pos[[s_.key for s_ in SPECS].index("make_model")][0]; ex.extra["make_model_ylab"] = round(float(_yl), 4); mm = MM.read_make_model(card, Vimg, _yl, paddle, cell)
             except Exception as e:   # не должно ронять весь СТС
                 mm = None; ex.extra["make_model_error"] = repr(e)[:120]
             if mm and mm["combined"] and (mm["valid"] or "make_model" not in F or mm["conf"] > F["make_model"].confidence):

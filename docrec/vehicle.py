@@ -4,6 +4,7 @@ import re
 from datetime import date
 from difflib import get_close_matches
 from .textutils import _lev
+from . import lexicon as LX
 
 PLATE_LET = "АВЕКМНОРСТУХ"
 _LAT2CYR = {"A": "А", "B": "В", "E": "Е", "K": "К", "M": "М", "H": "Н", "O": "О", "P": "Р", "C": "С", "T": "Т", "Y": "У", "X": "Х", "0": "О", "I": "Е", "1": "Е"}
@@ -148,3 +149,44 @@ def norm_vehicle_type(raw: str):
     sn = [_snap(w, VTYPES, 2) for w in words]
     out = " ".join(s[0] for s in sn)
     return out.capitalize(), sum(s[1] for s in sn) >= max(1, len(sn) // 2)
+
+
+# ---- привязка к лексиконам (docrec/lexicons/sts/*.txt.gz): фразы целиком, затем запасной пословный разбор выше
+def _best_window(text: str, lex: str, thr: float, min_words: int = 1):
+    """Лучшее совпадение среди непрерывных окон слов текста (лишние слова по краям — шум OCR). -> snap-dict или None."""
+    words = text.split(); best = None
+    for n in range(len(words), min_words - 1, -1):
+        for i in range(0, len(words) - n + 1):
+            s = LX.snap(" ".join(words[i:i + n]), lex, thr=thr)
+            if s["status"] in ("exact", "snapped"):
+                sc = (s["norm"] or 0.0) + 0.04 * (len(words) - n)   # потеря слов чуть штрафуется
+                if best is None or sc < best[0]: best = (sc, s)
+        if best is not None and n == len(words): break
+    return best[1] if best else None
+
+
+def norm_vehicle_type_lex(raw: str):
+    t = " ".join(re.sub(r"[^А-Яа-яЁёA-Za-z\- ]", " ", raw).split())
+    if len(t.replace(" ", "")) >= 5:
+        s = _best_window(t, "sts/vehicle_type", 0.22, 2 if len(t.split()) > 1 else 1)
+        if s: return s["value"], True, LX.note_for(s, "тип ТС")
+    v, ok = norm_vehicle_type(raw)
+    return v, ok, None
+
+
+def norm_color_lex(raw: str):
+    t = " ".join(re.sub(r"[^А-Яа-яЁё\- ]", "", raw).split())
+    if len(t) >= 3:
+        s = _best_window(t, "sts/color", 0.3)
+        if s: return s["value"], True, LX.note_for(s, "цвет")
+    v, ok = norm_color(raw)
+    return v, ok, None
+
+
+def norm_eco_lex(raw: str):
+    t = re.sub(r"[^А-Яа-яЁё ]", "", raw).strip()
+    if len(t) >= 3:
+        s = LX.snap(t.split()[0] if len(t.split()) == 1 else t, "sts/eco_class", thr=0.3)
+        if s["status"] in ("exact", "snapped"): return s["value"].split("|")[0], True, LX.note_for(s, "экокласс")
+    v, ok = norm_eco(raw)
+    return v, ok, None

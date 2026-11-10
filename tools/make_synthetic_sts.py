@@ -74,7 +74,18 @@ def scene(card, name, W_=1200, H_=1700, angle=6, tilt=0.05, scale=0.62, seed=0, 
 if __name__ == "__main__":
     scene(card_image(0, 0.014), "samples/synth_sts1.jpg", angle=6, seed=1)
     scene(card_image(1, 0.020), "samples/synth_sts2.jpg", angle=-9, tilt=0.09, scale=0.58, seed=2)   # другой сдвиг значений
-    # двуязычная марка/модель, строки вплотную (как на реальном бланке); суффикс S5 (буква+цифра) и 55 (две цифры — ложного «S» быть не должно)
-    for n, (ru, la, suf, a, tl) in enumerate([("КАМАЗ", "KAMAZ", "S5", 4, 0.06), ("КАМАЗ", "KAMAZ", "55", -5, 0.08)], 3):
-        g = dict(GT); g.update(make_model=f"{ru} 5490-{suf} / {la} 5490-{suf}", make_model_ru=f"{ru} 5490-{suf}", make_model_lat=f"{la} 5490-{suf}")
-        scene(card_image(n, 0.017, model=(f"{ru} 5490-{suf}", f"{la} 5490-{suf}"), pitch=17), f"samples/synth_sts{n}.jpg", angle=a, tilt=tl, scale=0.6, seed=n, gt=g)
+    # двуязычная марка/модель, строки вплотную (как на реальном бланке). Сценарии против путаниц: S5 (буква+цифра), 55 (две цифры — ложного «S» быть не должно),
+    # 0/8 в номере модели и S/8/5 в суффиксе; последние два — «плохой снимок» (JPEG q≈40 + уменьшение), как в жалобе пользователя.
+    scenes = [("5490", "S5", 4, 0.06, None), ("5511", "55", -5, 0.08, None), ("6580", "S5", -3, 0.05, None), ("43118", "50", 5, 0.07, None),
+              ("5320", "10", -4, 0.06, None), ("5490", "S5", 3, 0.06, (0.8, 40)), ("6580", "S5", -6, 0.07, (0.7, 40))]
+    for n, (num, suf, a, tl, deg) in enumerate(scenes, 3):
+        ru, la = "КАМАЗ", "KAMAZ"; mm = f"{num}-{suf}"
+        g = dict(GT); g.update(make_model=f"{ru} {mm} / {la} {mm}", make_model_ru=f"{ru} {mm}", make_model_lat=f"{la} {mm}")
+        name = f"samples/synth_sts{n}.jpg"
+        scene(card_image(n, 0.017, model=(f"{ru} {mm}", f"{la} {mm}"), pitch=17), name, angle=a, tilt=tl, scale=0.6, seed=n, gt=g)
+        if deg:   # деградация: уменьшение + сильное JPEG-сжатие
+            im = cv2.imread(name); im = cv2.resize(im, None, fx=deg[0], fy=deg[0], interpolation=cv2.INTER_AREA)
+            cv2.imwrite(name, im, [cv2.IMWRITE_JPEG_QUALITY, deg[1]])
+            gj = json.load(open(name.replace(".jpg", ".gt.json"))); gj["fields"] = {k: v for k, v in gj["fields"].items() if k in ("make_model", "make_model_ru", "make_model_lat", "vehicle_type", "color", "eco_class")}   # проверяем только то, ради чего сцена (остальное при такой деградации не гарантируется)
+            gj["corners_TL_TR_BR_BL"] = (np.array(gj["corners_TL_TR_BR_BL"]) * deg[0]).tolist()
+            json.dump(gj, open(name.replace(".jpg", ".gt.json"), "w"), ensure_ascii=False)

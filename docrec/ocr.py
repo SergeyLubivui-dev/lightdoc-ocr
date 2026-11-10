@@ -61,19 +61,26 @@ class OCREngine:
 
 
 
-def _recognize_chars(self, crop_bgr: np.ndarray):
-    """Распознавание строки с уверенностью по символам -> (text, score, [conf на символ текста])."""
+def _recognize_chars(self, crop_bgr: np.ndarray, with_pos: bool = False):
+    """Распознавание строки с уверенностью по символам -> (text, score, [conf на символ текста]); with_pos=True добавляет
+    список x-центров символов в пикселях кропа (None для пробелов; позиции приблизительные — шаг CTC)."""
     r = self.engine(crop_bgr, use_det=False, use_cls=False, use_rec=True, return_word_box=True)
     if r is None or not r.txts:
-        return "", 0.0, []
-    t = r.txts[0]; confs = []
+        return ("", 0.0, [], []) if with_pos else ("", 0.0, [])
+    t = r.txts[0]; confs = []; pos = []
     try:
-        confs = [float(x) for x in r.word_results[0].confs]
+        wi = r.word_results[0]
+        confs = [float(x) for x in wi.confs]
+        Wc = crop_bgr.shape[1]; L = float(wi.line_txt_len) or 1.0
+        flat = [c for cs in wi.word_cols for c in cs]
+        it = iter(flat)
+        for ch in t:
+            pos.append(None if ch == " " else (next(it, None) / L * Wc if True else None))
     except Exception:
-        confs = []
+        pos = [None] * len(t)
     if len(confs) != len(t):
         confs = [float(r.scores[0])] * len(t)
-    return t, float(r.scores[0]), confs
+    return (t, float(r.scores[0]), confs, pos) if with_pos else (t, float(r.scores[0]), confs)
 
 
 OCREngine.recognize_chars = _recognize_chars

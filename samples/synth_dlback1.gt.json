@@ -1,0 +1,121 @@
+{
+ "categories": [
+  {
+   "category": "A",
+   "open": false,
+   "date_from": null,
+   "date_to": null
+  },
+  {
+   "category": "A1",
+   "open": false,
+   "date_from": null,
+   "date_to": null
+  },
+  {
+   "category": "B",
+   "open": true,
+   "date_from": "06.07.1999",
+   "date_to": "06.05.2036"
+  },
+  {
+   "category": "B1",
+   "open": true,
+   "date_from": "07.05.2016",
+   "date_to": "06.05.2036"
+  },
+  {
+   "category": "C",
+   "open": true,
+   "date_from": "06.07.1999",
+   "date_to": "06.05.2036"
+  },
+  {
+   "category": "C1",
+   "open": true,
+   "date_from": "07.05.2016",
+   "date_to": "06.05.2036"
+  },
+  {
+   "category": "D",
+   "open": false,
+   "date_from": null,
+   "date_to": null
+  },
+  {
+   "category": "D1",
+   "open": false,
+   "date_from": null,
+   "date_to": null
+  },
+  {
+   "category": "BE",
+   "open": true,
+   "date_from": "06.05.2026",
+   "date_to": "06.05.2036"
+  },
+  {
+   "category": "CE",
+   "open": true,
+   "date_from": "28.11.2006",
+   "date_to": "06.05.2036"
+  },
+  {
+   "category": "C1E",
+   "open": true,
+   "date_from": "07.05.2016",
+   "date_to": "06.05.2036"
+  },
+  {
+   "category": "DE",
+   "open": false,
+   "date_from": null,
+   "date_to": null
+  },
+  {
+   "category": "D1E",
+   "open": false,
+   "date_from": null,
+   "date_to": null
+  },
+  {
+   "category": "M",
+   "open": true,
+   "date_from": "07.05.2016",
+   "date_to": "06.05.2036"
+  },
+  {
+   "category": "Tm",
+   "open": false,
+   "date_from": null,
+   "date_to": null
+  },
+  {
+   "category": "Tb",
+   "open": false,
+   "date_from": null,
+   "date_to": null
+  }
+ ],
+ "number": "77 00 123456",
+ "field_14": "1999",
+ "expiry": "06.05.2036",
+ "corners_TL_TR_BR_BL": [
+  [
+   473.3893737792969,
+   742.2426147460938
+  ],
+  [
+   773.2066040039062,
+   752.7124633789062
+  ],
+  [
+   762.1133422851562,
+   941.4403076171875
+  ],
+  [
+   471.2906188964844,
+   931.2845458984375
+  ]
+ ]
+}

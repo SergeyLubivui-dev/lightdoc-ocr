@@ -3,21 +3,65 @@
 venv/
 __pycache__/
 *.pyc
+*.pyo
+.env
+.env.*
+
 # результаты и входные данные / outputs and private inputs
 out/
 out*/
 in/
+in_real/
 input/
 private/
+tmp/
+*.log
+*.err
+
 # изображения: только samples/, examples/, docs/ / images only in samples/, examples/, docs/
 *.jpg
 *.jpeg
 *.png
+*.webp
+*.tif
+*.tiff
+*.bmp
+*.pdf
 !samples/**
 !examples/**
 !docs/**
+
+# локальные образцы и снимки, которых не должно быть в git
+# (samples/spec3.png и samples/face.png уже в репозитории — публичный/синтетический источник)
+samples/spec0.jpg
+samples/spec1.jpg
+samples/spec2.jpg
+samples/spec4.jpg
+samples/v_spec*
+samples/synth_card.png
+
+# результаты распознавания и отладка (examples/*/result.json уже в репозитории)
+result*.json
+combined.json
+debug_*
+
+# PII-скан, бэкапы, служебные скрипты (только локально)
+*.bundle
+pats.json
+pats_*.json
+pats_*.txt
+pats.py
+piigrep.py
+piigrep_*.py
+scan_repo.py
+*.zip
+
+# лишние локальные веса (уже отслеживаемые файлы в docrec/models/ остаются в репозитории)
+/models/
+
 # служебное
-*.log
-*.err
 .idea/
 .vscode/
+.DS_Store
+*.swp
+*~

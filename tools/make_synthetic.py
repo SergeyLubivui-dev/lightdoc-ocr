@@ -76,3 +76,7 @@ scene("samples/synth4.jpg", angle=5, tilt=0.08, scale=0.6, seed=4, bgc=(150,175,
 scene("samples/synth5.jpg", W=800, H=600, angle=-6, tilt=0.04, scale=0.38, seed=5)          # маленькая карточка, низкое разрешение
 scene("samples/synth6.jpg", angle=28, tilt=0.22, scale=0.5, seed=6, clutter=True, bgc=(60,70,60))  # сильная перспектива и «мусор»
 scene("samples/synth7.jpg", W=1200, H=1600, angle=78, tilt=0.07, scale=0.75, seed=7)        # вертикально
+
+# маленькая карточка на белом листе A4 (скан 300 dpi ≈ 2480x3508, карточка ≈ 7–9 % площади), поворот и перспектива
+scene("samples/synth8.jpg", W=1654, H=2339, angle=6, tilt=0.03, scale=0.44, seed=8, bgc=(236, 236, 233))                       # A4 150 dpi, лёгкий поворот
+scene("samples/synth9.jpg", W=1654, H=2339, angle=-13, tilt=0.11, scale=0.40, seed=9, bgc=(240, 239, 236), glare=False)       # сильнее перспектива

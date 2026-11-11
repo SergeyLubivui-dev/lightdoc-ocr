@@ -4,6 +4,7 @@ from .sysutil import peak_rss_mb
 from pathlib import Path
 import cv2
 import numpy as np
+from .photoframe import refine_photo_box
 from .geometry import find_card_quad, warp_card, order_corners, small_card_crop
 from .doctypes import REGISTRY
 from .doctypes import free_text
@@ -92,16 +93,28 @@ class DocumentPipeline:
     def process(self, path, out_dir) -> dict:
         t0 = time.perf_counter()
         out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-        img = imread(path); meta = None
+        img = imread(path); meta = None; sheet = img
         if self.mode in ("auto", "card"):
             try:
                 sc = small_card_crop(img)
             except Exception:
                 sc = None
             if sc is not None: img, meta = sc
-        self._quad_hint = np.float32(meta["quad"]) if meta else None
+        self._quad_hint = np.float32(meta["quad"]) if meta else None; self._quad_method = meta.get("quad_method", "small_card_blob") if meta else None
         try: r = self._process_inner(path, out, img, t0)
         finally: self._quad_hint = None
+        if meta and isinstance(r, dict) and isinstance(r.get("corners"), dict):
+            # углы возвращаем в координатах ИСХОДНОГО листа (а не вырезанного и увеличенного фрагмента), плюс отладочная картинка «квад на листе»
+            s_ = float(meta["scale"]); bx0, by0 = meta["bbox_src"][0], meta["bbox_src"][1]
+            pc = np.float32(r["corners"]["points"]); ps = pc / s_ + np.float32([bx0, by0])
+            r["corners"]["points_crop"] = r["corners"]["points"]; r["corners"]["points"] = [[round(float(x), 1), round(float(y), 1)] for x, y in ps]
+            r["corners"]["coords"] = "исходный лист"
+            try:
+                dbg = sheet.copy(); th = max(2, int(max(dbg.shape[:2]) / 500))
+                cv2.polylines(dbg, [ps.astype(np.int32)], True, (0, 255, 0), th, cv2.LINE_AA)
+                for i, (x, y) in enumerate(ps): cv2.circle(dbg, (int(x), int(y)), th * 3, (0, 0, 255), -1); cv2.putText(dbg, ["TL", "TR", "BR", "BL"][i], (int(x) + 10, int(y) - 10), cv2.FONT_HERSHEY_SIMPLEX, th / 1.6, (0, 140, 255), th, cv2.LINE_AA)
+                pdbg = Path(out) / "debug_sheet.jpg"; imwrite(pdbg, dbg); r.setdefault("files", {})["debug_sheet"] = str(pdbg)
+            except Exception: pass
         if meta: meta = {k: v for k, v in meta.items() if k != "quad"}
         if meta and isinstance(r, dict):
             r["small_card"] = meta; r.setdefault("warnings", []).append("small_card: карточка занимает %.1f%% листа — вырезана и увеличена ×%s" % (100 * meta["area_ratio"], meta["scale"]))
@@ -305,7 +318,13 @@ class DocumentPipeline:
         if res["doc_type"] == "unknown": return True
         if getattr(REGISTRY[res["doc_type"]], "hybrid_internal", False): return False
         exp = getattr(REGISTRY[res["doc_type"]], "expected_fields", None)
-        return bool(exp) and sum(k in res["fields"] for k in exp) < 0.85 * len(exp)
+        if bool(exp) and sum(k in res["fields"] for k in exp) < 0.85 * len(exp): return True
+        core = getattr(REGISTRY[res["doc_type"]], "core_fields", None)       # ключевые поля обязаны быть прочитаны (иначе второй движок), даже если остальных хватает на 85 %
+        if core and any(k not in res["fields"] or not res["fields"][k].get("value") for k in core): return True
+        if core and exp:
+            confs = [res["fields"][k].get("confidence") or 0.0 for k in exp if k in res["fields"]]
+            if confs and sum(c < 0.6 for c in confs) >= 3: return True
+        return False
 
     @staticmethod
     def _paddle_available() -> bool:
@@ -318,7 +337,7 @@ class DocumentPipeline:
     def _merge(self, base, alt, out):
         """Берём лучший по числу полей результат; недостающие поля добавляем из второго."""
         exp = getattr(REGISTRY.get(alt["doc_type"], None), "expected_fields", None) or []
-        score = lambda r: (r["doc_type"] != "unknown", sum(k in r["fields"] for k in exp), r["confidence"])
+        score = lambda r: (r["doc_type"] != "unknown", sum(k in r["fields"] for k in exp), round(sum((r["fields"][k].get("confidence") or 0.0) for k in exp if k in r["fields"]), 1), r["confidence"])
         best, other = (alt, base) if score(alt) > score(base) else (base, alt)
         if best["doc_type"] == other["doc_type"]:
             for k, v in other["fields"].items():
@@ -345,7 +364,7 @@ class DocumentPipeline:
 
         t = time.perf_counter()
         aspects = tuple(sorted({t_.aspect for t_ in REGISTRY.values()}))
-        if getattr(self, "_quad_hint", None) is not None: quad, qscore, qmethod = self._quad_hint, 0.8, "small_card_blob"
+        if getattr(self, "_quad_hint", None) is not None: quad, qscore, qmethod = self._quad_hint, (0.9 if getattr(self, "_quad_method", "") == "paper_lines" else 0.8), getattr(self, "_quad_method", None) or "small_card_blob"
         else: quad, qscore, qmethod = find_card_quad(img, target_aspects=aspects)
         quad = order_corners(quad)
         T["detect_card"] = time.perf_counter() - t
@@ -441,15 +460,26 @@ class DocumentPipeline:
             if ex.photo_zone:
                 x0, y0, x1, y1 = ex.photo_zone
                 px0, py0, px1, py1 = int(x0 * cw), int(y0 * ch), int(x1 * cw), int(y1 * ch)
-                photo = card[py0:py1, px0:px1].copy()
-                pad = int(0.25 * (px1 - px0))
-                ctx = card[max(0, py0 - pad):py1 + pad, max(0, px0 - pad):px1 + pad]
+                pad = int(0.25 * (px1 - px0)); ox, oy = max(0, px0 - pad), max(0, py0 - pad)
+                ctx = card[oy:py1 + pad, ox:px1 + pad]
                 f = self._detect_face(ctx)
                 res["photo"] = {"zone_rel": [round(v, 3) for v in ex.photo_zone], "face_detected": f is not None}
+                fbox = None
                 if f is not None:
-                    fx, fy, fw, fh = f[:4]; fcx = (fx + fw / 2 + max(0, px0 - pad)) / cw; fcy = (fy + fh / 2 + max(0, py0 - pad)) / ch
+                    fx, fy, fw, fh = [float(v) for v in f[:4]]; fbox = (fx + ox, fy + oy, fw, fh)
+                    fcx = (fx + fw / 2 + ox) / cw; fcy = (fy + fh / 2 + oy) / ch
                     inside = x0 <= fcx <= x1 and y0 <= fcy <= y1
-                    res["photo"].update({"face_confidence": round(float(f[-1]), 3), "face_center_inside_zone": bool(inside)})
+                    res["photo"].update({"face_confidence": round(float(f[-1]), 3), "face_center_inside_zone": bool(inside),
+                                         "face_box_rel": [round(v, 3) for v in (fbox[0] / cw, fbox[1] / ch, (fbox[0] + fw) / cw, (fbox[1] + fh) / ch)]})
+                # окно снимка — по найденной рамке (перепад цвета по 4 сторонам), лицо проверяет; не нашли — зона шаблона
+                try:
+                    (bx0, by0, bx1, by1), pinfo = refine_photo_box(card, (px0, py0, px1, py1), fbox)
+                except Exception as e:
+                    (bx0, by0, bx1, by1), pinfo = (px0, py0, px1, py1), {"method": "zone", "reason": str(e)[:80]}
+                res["photo"].update({"method": pinfo["method"], "box_rel": [round(bx0 / cw, 3), round(by0 / ch, 3), round(bx1 / cw, 3), round(by1 / ch, 3)]})
+                if pinfo.get("reason"): res["photo"]["fallback_reason"] = pinfo["reason"]
+                if "face_center_offset_px" in pinfo: res["photo"]["face_center_offset_px"] = pinfo["face_center_offset_px"]
+                photo = card[by0:by1, bx0:bx1].copy()
         # --- сохранение
         p_card, p_photo, p_dbg, p_json = out / "card.jpg", out / "photo.jpg", out / "debug.jpg", out / "result.json"
         imwrite(p_card, card)

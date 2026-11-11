@@ -26,4 +26,25 @@ def cross_check(results: list[dict]) -> list[dict]:
                 m = (_norm(a) == _norm(b)) if (a and b) else None
                 out.append(dict(kind=title, front_index=i, back_index=j, front=a, back=b, match=m,
                                 note=("совпадают" if m else "НЕ СОВПАДАЮТ — вероятно, лицо и оборот от разных документов или ошибка чтения" if m is False else "номер прочитан не на обеих сторонах")))
+    out += _categories_check(results)
+    return out
+
+
+def _categories_check(results):
+    """Категории: лицевая сторона (цепочка рамок поля 9) против открытых строк таблицы на обороте. Расхождение — повод для проверки, а не ошибка:
+    на лицевой печатаются только категории с действующим правом, а таблица оборота может содержать и истёкшие."""
+    out = []
+    for i, fr in enumerate(results):
+        if fr.get("doc_type") != "driver_license_rf": continue
+        fc = _val(fr, "categories")
+        if not isinstance(fc, list): continue
+        for j, bk in enumerate(results):
+            if bk.get("doc_type") != "driver_license_back": continue
+            rows = _val(bk, "categories")
+            if not isinstance(rows, list): continue
+            back = [r["category"] for r in rows if isinstance(r, dict) and r.get("open")]
+            only_front, only_back = sorted(set(fc) - set(back)), sorted(set(back) - set(fc))
+            m = not only_front and not only_back
+            out.append(dict(kind="Категории", front_index=i, back_index=j, front=fc, back=back, match=m,
+                            note="совпадают" if m else f"расхождение: только на лицевой {only_front}, только на обороте {only_back}"))
     return out

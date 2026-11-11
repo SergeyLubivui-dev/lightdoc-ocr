@@ -264,16 +264,17 @@ def parse_layout_b(card, card_lines, paddle, F, ex):
                 if t: parts.append((t, s))
             txt = " ".join(t for t, _ in parts)
             txt = re.sub(r"\s+", " ", txt).strip()
-            mm = re.match(r"^(.*?)(\d{2,4})\s*[.,]\s*(\d)\s*К[ВB8]Т\s*/\s*(\d{2,4})\s*[.,]\s*(\d)\s*(.*)$", txt, re.I)
+            mm = re.match(r"^(.*?)(\d{2,4})\s*[.,]\s*(\d)\s*К[ВB8][ТT]\s*/\s*(\d{2,4})\s*[.,]\s*(\d)\s*(.*)$", txt, re.I)
             if mm and len(re.sub(r"[^А-Яа-яA-Za-z]", "", mm.group(6))) <= 4 and re.fullmatch(r"[ЛПГСCлпгсcIil1|.\s]*", mm.group(6)):     # «Л.С.» переносится на следующую строку («Л.» / «С»), хвост часто искажён
-                txt = f"{mm.group(1).strip()} {mm.group(2)}.{mm.group(3)} КВТ/{mm.group(4)}.{mm.group(5)} Л.С.".strip()
+                head = re.sub(r"^\S{0,2}[ОO0][ЩШ]НОСТ[ЬБ]?\s*$", "МОЩНОСТЬ", mm.group(1).strip(), flags=re.I) if partial_ratio("МОЩНОСТЬ", mm.group(1).strip()) >= 0.8 else mm.group(1).strip()      # «ДОЩНОСТЬ» → «МОЩНОСТЬ»
+                txt = f"{head} {mm.group(2)}.{mm.group(3)} КВТ/{mm.group(4)}.{mm.group(5)} Л.С.".strip()
             if not txt: F["special_marks"] = Field("", 0.8, "пусто", valid=True)
             else:
                 from .sts_back import join_breaks
                 txt, joins = join_breaks(txt)
                 tu = txt.upper().replace("МОЩНОСТЬ", "МОЩНОСТЬ")
                 F["special_marks"] = Field(txt, float(np.mean([s for _, s in parts])), ("склеены переносы: " + ", ".join(joins)) if joins else None, valid=True)
-                m = re.search(r"(\d{2,4})\s*[.,]\s*(\d)\s*КВТ\s*/\s*(\d{2,4})\s*[.,]\s*(\d)", tu)
+                m = re.search(r"(\d{2,4})\s*[.,]\s*(\d)\s*КВ[ТT]\s*/\s*(\d{2,4})\s*[.,]\s*(\d)", tu)
                 if m:
                     kw = float(f"{m.group(1)}.{m.group(2)}"); hp = float(f"{m.group(3)}.{m.group(4)}")
                     F["power_kw"] = Field(kw, F["special_marks"].confidence, "из особых отметок", valid=True); F["power_hp"] = Field(hp, F["special_marks"].confidence, "из особых отметок", valid=True)

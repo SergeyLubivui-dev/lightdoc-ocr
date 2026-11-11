@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 import re
+from difflib import SequenceMatcher
 from datetime import date
 import numpy as np
 import cv2
@@ -52,6 +53,11 @@ _PREFIX_RE = re.compile(r"^\s*(?:\d{1,2}\s*[abcабс]?\s*[.)]|4\s*[abcабс](?
 
 def _strip_label(l: Line) -> Line:
     """Если детектор приклеил номер поля к значению («4a) 20.10.2011») — отрезаем его."""
+    m4b = re.match(r"^\s*[4A]\s*[6bBбвВ]\s*[.),]?\s*(?=\d{2}\s*[.,:]\s*\d{2}\s*[.,:]\s*\d{4})", l.text)       # «4b)» приклеено к дате и искажено («4620.10.2021», «4В)20.10.2021»)
+    if m4b:
+        import copy
+        n = copy.copy(l); n.text = l.text[m4b.end():]
+        return n
     m = _PREFIX_RE.match(l.text)
     if m and m.end() < len(l.text) and not re.match(r"^\d{2}\.\d{2}\.\d{4}", l.text):
         import copy
@@ -188,9 +194,18 @@ def parse_categories_zone(card, zone_lines, shift, cell, rec):
 
 
 # Ожидаемые положения подписей-номеров полей слева (центры по Y, левый край X) на эталонной карточке.
-LABEL_CY = {"1": 0.225, "2": 0.324, "3": 0.416, "4a": 0.553, "4c": 0.604, "5": 0.697, "8": 0.745, "6": 0.814, "7": 0.866}
+LABEL_CY = {"1": 0.225, "2": 0.324, "3": 0.416, "4a": 0.553, "4c": 0.604, "5": 0.697, "8": 0.745, "6": 0.814, "7": 0.866, "9": 0.888}
 LABEL_X0 = 0.352
 _LABEL_KEY = re.compile(r"^\s*(\d)\s*([abcабс]?)\s*[.)]?\s*$", re.I)
+_LABEL_GLUED = re.compile(r"^\s*(\d)\s*([abcабс]?)\s*[.)]\s*(?=\S)", re.I)      # детектор склеил подпись со значением: «3. 14.03.1987», «4a) 20.10.2011»
+
+
+def label_key(l) -> str | None:
+    """ключ подписи поля по строке: отдельная подпись («2.») или подпись, приклеенная к значению; иначе None"""
+    m = _LABEL_KEY.match(l.text)
+    if not m and l.x0 < 0.40: m = _LABEL_GLUED.match(l.text)
+    if not m: return None
+    return m.group(1) + m.group(2).lower().replace("а", "a").replace("б", "b").replace("с", "c")
 
 
 def _monotone(pairs):
@@ -208,15 +223,50 @@ def _monotone(pairs):
     return out[::-1]
 
 
+_ROW_KEYS = ["1", "2", "3", "4a", "4c", "5", "8", "9"]
+_ROW_ZONE = {"1": "f1_surname", "2": "f2_name", "3": "f3_birth", "4a": "f4ab_dates", "4c": "f4c_issuer", "5": "f5_number", "8": "f8_region", "9": "f9_categories"}
+_ROW_TOP = {"1": 0.018, "2": 0.026, "3": 0.026, "4a": 0.026, "4c": 0.026, "5": 0.026, "8": 0.026, "9": 0.040}      # верх зоны = y подписи поля − отступ (строка значения над/на уровне подписи, латиница — ниже)
+
+
+def label_rows(lines):
+    """Подписи полей «1.» «2.» «3.» «4a)» «4c)» «5.» «8.» «9.» -> (y подписи в координатах шаблона по ключам, найденные ключи).
+    Последовательность обязана идти сверху вниз (LIS по паре шаблонный-у / реальный-у), ложные срабатывания вне порядка отбрасываются."""
+    pairs = []
+    for l in lines:
+        if not (0.30 < l.x0 < 0.45): continue
+        key = label_key(l)
+        if key is None: continue
+        if key == "4b": continue
+        if key in LABEL_CY: pairs.append((LABEL_CY[key], l.cy, key))
+    mono = _monotone([(a, b) for a, b, _ in pairs]) if pairs else []
+    ok = {a for a, _ in mono}
+    return {k: b for a, b, k in pairs if a in ok and k in _ROW_KEYS}
+
+
+def dynamic_zones(lines):
+    """Зоны полей по реально найденным подписям (а не по фиксированному шаблону): граница между полями = y следующей подписи − отступ.
+    Недостающие подписи достраиваются по шаблону, смещённому медианной невязкой найденных. -> (zones, rows_found)"""
+    rows = label_rows(lines)
+    if len(rows) < 3: return dict(ZONES), rows
+    off = float(np.median([rows[k] - LABEL_CY[k] for k in rows]))
+    cy = {k: rows.get(k, LABEL_CY[k] + off) for k in _ROW_KEYS}
+    z = {}
+    for i, k in enumerate(_ROW_KEYS):
+        y0 = cy[k] - _ROW_TOP[k]
+        if k == "1" and k not in rows: y0 = ZONES["f1_surname"][1] + off      # подписи «1.» не видно — верх по шаблону (над ней строки «DRIVING LICENCE»)
+        y1 = (cy[_ROW_KEYS[i + 1]] - _ROW_TOP[_ROW_KEYS[i + 1]]) if i + 1 < len(_ROW_KEYS) else ZONES["f9_categories"][3]
+        zz = ZONES[_ROW_ZONE[k]]; z[_ROW_ZONE[k]] = (zz[0], y0, zz[2], y1)
+    return z, rows
+
+
 def calibrate(lines):
     """Оцениваем сдвиг/масштаб по Y и сдвиг по X по найденным подписям полей (1. 2. 3. 4a) 4c) 5. 8.).
     Нужно, когда рамка карточки найдена с погрешностью в 1–3 %. Возвращает (a, b, dx): y_real = a*y_tpl + b."""
     ys, xs = [], []
     for l in lines:
         if l.x0 > 0.45: continue
-        m = _LABEL_KEY.match(l.text)
-        if not m: continue
-        key = m.group(1) + m.group(2).lower().replace("а", "a").replace("б", "b").replace("с", "c")
+        key = label_key(l)
+        if key is None: continue
         if key in LABEL_CY and 0.30 < l.x0 < 0.42:
             ys.append((LABEL_CY[key], l.cy)); xs.append(l.x0 - LABEL_X0)
     if len(ys) < 3:
@@ -252,6 +302,7 @@ class DriverLicenseRF(DocType):
     title_ru = "Водительское удостоверение РФ (карточка 2011+, лицевая сторона)"
     keywords = [("ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ", 4), ("ГИБДД", 1.2), ("GIBDD", 1.2), ("RUS", 0.6)]
     implemented = True
+    core_fields = ["surname", "given_names", "birth_date", "number", "issue_date"]
     expected_fields = ["surname", "surname_lat", "given_names", "given_names_lat", "birth_date", "birth_place", "birth_place_lat", "issue_date", "expiry_date", "issuer", "issuer_code", "number", "region", "region_lat", "categories"]
 
     # ---- классификация: ключевые слова + структурные признаки
@@ -277,10 +328,13 @@ class DriverLicenseRF(DocType):
         lines = to_template(lines, ca, cb, cdx)
         pz = PHOTO_ZONE
         ex.photo_zone = (pz[0] + cdx, ca * pz[1] + cb, pz[2] + cdx, ca * pz[3] + cb)
+        lines_lab = lines      # подписи полей (в т.ч. приклеенные к значению) — для привязки строк
         # лишние «метки» (1. 2. 3 4a) и всё слева от значений убираем
         lines = [_strip_label(l) for l in lines]
         vals = [l for l in lines if l.cx >= 0.40 and l.x1 > 0.42 and not _LABEL_RE.match(l.text)]
-        zone = {k: sorted([l for l in vals if in_zone(l, z)], key=lambda l: l.cy) for k, z in ZONES.items()}
+        zones_dyn, rows_found = dynamic_zones(lines_lab)
+        ex.extra["label_rows"] = {"found": sorted(rows_found), "missing": [k for k in _ROW_KEYS if k not in rows_found], "zones": "by_labels" if len(rows_found) >= 3 else "template"}
+        zone = {k: sorted([l for l in vals if in_zone(l, z)], key=lambda l: l.cy) for k, z in zones_dyn.items()}
 
         def by_script(ls):
             ru = [l for l in ls if script_of(l.text) in ("ru", "mixed")]
@@ -436,6 +490,20 @@ class DriverLicenseRF(DocType):
         cats, cats_conf, cats_note = parse_categories_zone(card, zl, (ca, cb, cdx), cell, rec)
         if cats:
             F["categories"] = Field(cats, cats_conf, cats_note)
+        # цепочка рамок поля 9: геометрия + шаблоны букв + фиксированный порядок категорий (OCR выше — только сверка)
+        try:
+            from .. import catboxes as CBX
+            ycal = ca * 0.888 + cb if (ca and abs(ca - 1) < 0.25) else 0.888
+            bx = CBX.read_categories(card, region=(0.36, float(np.clip(ycal - 0.11, 0.6, 0.9)), 0.995, 1.0), cell=cell, hint=list(cats) if cats else None)
+        except Exception as e:      # геометрия рамок не обязательна
+            bx = None; ex.extra["category_boxes_error"] = str(e)[:120]
+        if bx and bx["categories"] and bx["confidence"] >= 0.45:
+            ex.extra["category_boxes"] = bx["boxes"]
+            agree = bool(cats) and list(cats) == list(bx["categories"])
+            note = f"по цепочке рамок: {len(bx['boxes'])} шт. в {len({b['row'] for b in bx['boxes']})} стр., средняя уверенность {bx['confidence']}"
+            if cats and not agree: note += f"; OCR-разбор строки давал {list(cats)}"
+            F["categories"] = Field(list(bx["categories"]), round(min(1.0, bx["confidence"] + (0.2 if agree else 0.0) + 0.1), 2), note)
+        elif bx: ex.extra["category_boxes_rejected"] = {"confidence": bx["confidence"], "categories": bx["categories"]}
         # сверка латиницы с кириллицей по ICAO-транслитерации (исправляет «KRASNODARSKIL» → «KRASNODARSKII»)
         for ru_k, la_k in (("surname", "surname_lat"), ("given_names", "given_names_lat"), ("birth_place", "birth_place_lat"),
                            ("region", "region_lat"), ("issuer", "issuer_lat")):
@@ -453,6 +521,20 @@ class DriverLicenseRF(DocType):
                 if ch:
                     F[la_k].note = f"было '{F[la_k].value}', исправлено по транслитерации «{F[ru_k].value}»"
                     F[la_k].value = new
+        # пробел между именем и отчеством в латинице («ALEKSANDRSERGEEVICH» → «ALEKSANDR SERGEEVICH») по границе слов в кириллице
+        if "given_names" in F and "given_names_lat" in F and isinstance(F["given_names_lat"].value, str) and " " not in F["given_names_lat"].value:
+            parts = str(F["given_names"].value).split()
+            if len(parts) == 2:
+                a_ = translit(parts[0]); b_ = translit(parts[1]); lv = F["given_names_lat"].value
+                best = max(((SequenceMatcher(None, lv[:c], a_).ratio() + SequenceMatcher(None, lv[c:], b_).ratio(), c) for c in range(max(1, len(a_) - 2), min(len(lv) - 1, len(a_) + 3))), default=(0, 0))
+                if best[0] >= 1.7:
+                    cut = best[1]; F["given_names_lat"].note = f"добавлен пробел между словами (было '{lv}')"; F["given_names_lat"].value = lv[:cut] + " " + lv[cut:]
+        # орган выдачи, латиница: мелкий шрифт читается хуже жирной кириллической строки -> код берём из кириллицы, если она увереннее
+        if "issuer" in F and "issuer_lat" in F and "issuer_code" in F and re.fullmatch(r"ГИБДД \d{4}", str(F["issuer"].value)):
+            il = str(F["issuer_lat"].value)
+            if F["issuer"].confidence > F["issuer_lat"].confidence + 0.03 and il != "GIBDD " + F["issuer_code"].value:
+                F["issuer_lat"].note = f"было '{il}', выровнено по кириллической строке (она читается увереннее)"; F["issuer_lat"].value = "GIBDD " + F["issuer_code"].value
+                F["issuer_code"].note = None; F["issuer_code"].confidence = max(F["issuer_code"].confidence, min(F["issuer"].confidence, 0.9))
         from .. import lexicon as LX
         for k in ("birth_place", "region"):   # места/регионы: пословная привязка к публичным лексиконам (строго, известные слова не трогаем)
             if k in F and isinstance(F[k].value, str) and F[k].value:

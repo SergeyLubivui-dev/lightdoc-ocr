@@ -197,6 +197,15 @@ def _repair(cands: list, ok) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _below_table(card):
+    """нормированный y нижней линии таблицы категорий: красный номер и поле 14 лежат сразу под ней (а не на фиксированной высоте карточки)"""
+    try:
+        g = find_grid(card)
+        if g and g.get("ys"): return float(max(g["ys"])) / card.shape[0]
+    except Exception: pass
+    return None
+
+
 @register
 class DriverLicenseBack(DocType):
     name = "driver_license_back"; title_ru = "Водительское удостоверение РФ, оборотная сторона"
@@ -311,7 +320,10 @@ class DriverLicenseBack(DocType):
                     y = re.fullmatch(r"\W*(?:14\W*)?\s*(19[5-9]\d|20[0-3]\d)\W*", l.text.strip())
                     if y: F["field_14"] = Field(y.group(1), float(l.score) * 0.85, "поле 14 (год), отдельный проход по левой нижней части", valid=True); break
             except Exception: pass
-        for y0, y1 in ((0.79, 0.885), (0.77, 0.9), (0.8, 0.87)):
+        tb = _below_table(card)
+        wins = ((0.79, 0.885), (0.77, 0.9), (0.8, 0.87))
+        if tb is not None and tb < 0.93: wins = ((tb + 0.004, min(1.0, tb + 0.085)), (tb - 0.01, min(1.0, tb + 0.10))) + wins
+        for y0, y1 in wins:
             crop = cv2.cvtColor(card[int(y0 * H):int(y1 * H), int(0.10 * W):int(0.62 * W)], cv2.COLOR_BGR2GRAY)
             for sc in (2, 3):
                 try: t, cf = paddle.recognize_crop(cv2.cvtColor(cv2.resize(crop, None, fx=sc, fy=sc, interpolation=cv2.INTER_CUBIC), cv2.COLOR_GRAY2BGR))
@@ -390,7 +402,10 @@ class DriverLicenseBack(DocType):
                 if m and (best is None or l.score > best[1]): best = (f"{m.group(1)} {m.group(2)} {m.group(3)}", float(l.score))
         if best is None and paddle is not None and hasattr(paddle, "recognize_crop"):    # красный номер: разность каналов R−G убирает розовый фон, строка читается как одна
             votes = Counter(); sc_ = {}
-            for y0, y1 in ((0.83, 0.94), (0.81, 0.95), (0.84, 0.93)):
+            tb = _below_table(card)
+            wins = ((0.83, 0.94), (0.81, 0.95), (0.84, 0.93))
+            if tb is not None and tb < 0.93: wins = ((tb + 0.004, min(1.0, tb + 0.095)), (tb - 0.01, min(1.0, tb + 0.11))) + wins
+            for y0, y1 in wins:
                 crop = card[int(y0 * H):int(y1 * H), int(0.42 * W):int(0.99 * W)]
                 bb, gg, rr = [crop[:, :, i].astype(np.float32) for i in range(3)]
                 red = np.clip(255 - np.clip((rr - gg) * 3.0, 0, 255), 0, 255).astype(np.uint8)

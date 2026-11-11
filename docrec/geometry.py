@@ -1,5 +1,6 @@
 """Поиск границ карточки (4 угла), перспективная коррекция."""
 from __future__ import annotations
+import os
 import cv2
 import numpy as np
 
@@ -201,6 +202,112 @@ def warp_card(img: np.ndarray, quad: np.ndarray, size=(1026, 648)) -> np.ndarray
     return cv2.warpPerspective(img, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
 
+def refine_quad_edges(img: np.ndarray, quad: np.ndarray, win_rel=0.045, segs=14):
+    """Подтягивает каждую сторону четырёхугольника к настоящему краю карточки: вдоль нормали ищем самый резкий перепад (градиент Lab) —
+    край карточки резче, чем тень/ореол на листе. Точки по сегментам стороны -> Huber-прямая -> пересечения. Возвращает (quad, ok)."""
+    lab = cv2.GaussianBlur(cv2.cvtColor(img, cv2.COLOR_BGR2LAB).astype(np.float32), (0, 0), 1.0)
+    grad = np.zeros(lab.shape[:2], np.float32)
+    for c in range(3):
+        gx = cv2.Sobel(lab[..., c], cv2.CV_32F, 1, 0, ksize=3); gy = cv2.Sobel(lab[..., c], cv2.CV_32F, 0, 1, ksize=3); grad += gx * gx + gy * gy
+    grad = np.sqrt(grad)
+    short = float(min(np.linalg.norm(quad[0] - quad[1]), np.linalg.norm(quad[1] - quad[2])))
+    cur = np.float32(quad); area0 = abs(cv2.contourArea(cur))
+    for it, win in enumerate((win_rel, win_rel * 0.5)):
+        W = max(4, int(win * short)); lines = []
+        for i in range(4):
+            a, b = cur[i], cur[(i + 1) % 4]; ab = b - a; L = float(np.linalg.norm(ab)); u = ab / L; nrm = np.array([-u[1], u[0]], np.float32)
+            ctr = cur.mean(axis=0)
+            if float((ctr - a) @ nrm) < 0: nrm = -nrm           # нормаль внутрь
+            pts = []; g_ref = []; g_org = []
+            for k in range(segs):
+                t0 = 0.16 + 0.68 * k / segs; t1 = 0.16 + 0.68 * (k + 1) / segs
+                prof = np.zeros(2 * W + 1, np.float32)
+                for t in np.linspace(t0, t1, 7):
+                    base = a + u * (t * L)
+                    xs = base[0] + nrm[0] * np.arange(-W, W + 1); ys = base[1] + nrm[1] * np.arange(-W, W + 1)
+                    prof += cv2.remap(grad, xs.reshape(1, -1).astype(np.float32), ys.reshape(1, -1).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)[0]
+                prof /= 7
+                if prof.max() < 6.0: continue
+                pm_ = np.convolve(prof, np.ones(3) / 3, mode="same"); thr_ = 0.5 * pm_.max()       # самый ВНЕШНИЙ заметный пик (нормаль внутрь): детали у края (таблица, цифры) не перетягивают сторону
+                j = next((q for q in range(1, len(pm_) - 1) if pm_[q] >= thr_ and pm_[q] >= pm_[q - 1] and pm_[q] >= pm_[q + 1]), int(np.argmax(prof)))
+                pts.append(a + u * (0.5 * (t0 + t1) * L) + nrm * (j - W)); g_ref.append(float(pm_[j])); g_org.append(float(pm_[max(0, W - 1):W + 2].max()))
+            if len(pts) < 6: return quad, False
+            # переносим сторону, только если новый край заметно резче текущего (тень/ореол даёт мягкий перепад; настоящий край карточки — резкий)
+            if np.mean(g_ref) >= 1.4 * np.mean(g_org): lines.append(cv2.fitLine(np.float32(pts), cv2.DIST_HUBER, 0, 0.01, 0.01).ravel())
+            else: lines.append(np.float32([u[0], u[1], a[0], a[1]]))
+        new = []
+        for i in range(4):
+            p_ = _line_intersect(lines[i - 1], lines[i])
+            if p_ is None: return quad, False
+            new.append(p_)
+        new = order_corners(np.float32(new)); a1 = abs(cv2.contourArea(new))
+        if not (0.55 * area0 <= a1 <= 1.08 * area0) or np.max(np.linalg.norm(new - cur, axis=1)) > 0.2 * short: return quad, False
+        cur = new
+    return cur.astype(np.float32), True
+
+
+def paper_card_quad(img: np.ndarray, bbox=None, min_ratio=0.003, max_ratio=0.35):
+    """Бледная карточка на белом листе (скан А4): маска «не бумага» (расстояние цвета от цвета бумаги, оцененного по кольцу вокруг карточки),
+    затем 4 стороны по контуру (Huber-прямые по прямым участкам, скруглённые углы отбрасываются) -> перспективный четырёхугольник TL,TR,BR,BL.
+    -> (quad[4,2] в координатах img, info) | None."""
+    h, w = img.shape[:2]
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    if bbox is None:
+        bg = float(np.percentile(g, 92)); m = (g.astype(np.float32) < bg - 28).astype(np.uint8)
+        k = max(5, int(0.02 * min(h, w))); m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+        n, lab, st, _ = cv2.connectedComponentsWithStats(m)
+        if n < 2: return None
+        i = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA])); bbox = tuple(int(st[i, c]) for c in (cv2.CC_STAT_LEFT, cv2.CC_STAT_TOP, cv2.CC_STAT_WIDTH, cv2.CC_STAT_HEIGHT))
+    x, y, bw, bh = bbox
+    pad = int(0.15 * max(bw, bh)) + 8
+    x0, y0, x1, y1 = max(0, x - pad), max(0, y - pad), min(w, x + bw + pad), min(h, y + bh + pad)
+    roi = img[y0:y1, x0:x1].astype(np.float32)
+    ring = np.ones(roi.shape[:2], np.uint8); ring[max(0, y - y0 - 6):y - y0 + bh + 6, max(0, x - x0 - 6):x - x0 + bw + 6] = 0
+    if ring.sum() < 200: return None
+    paper = np.median(roi[ring > 0], axis=0)
+    d = cv2.GaussianBlur(np.abs(roi - paper).max(axis=2), (0, 0), 1.2)
+    ringd = d[ring > 0]; thr = max(9.0, float(np.percentile(ringd, 99)) + 4.0)
+    m = (d > thr).astype(np.uint8)
+    k = max(3, int(0.012 * max(bw, bh))); m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m)
+    if n < 2: return None
+    cx_, cy_ = x - x0 + bw // 2, y - y0 + bh // 2
+    j = int(lab[cy_, cx_]) or (1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA])))
+    comp = (lab == j).astype(np.uint8)
+    cnts, _ = cv2.findContours(comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    c = max(cnts, key=cv2.contourArea); area = cv2.contourArea(c)
+    ratio = area / float(w * h)
+    if not (min_ratio <= ratio <= max_ratio): return None
+    hull = cv2.convexHull(c)
+    box = cv2.boxPoints(cv2.minAreaRect(hull)).astype(np.float32); quad = order_corners(box)
+    pts = c.reshape(-1, 2).astype(np.float32)
+    lines = []; diag = float(np.linalg.norm(quad[0] - quad[2]))
+    for it in range(3):          # итеративно: полосы вдоль сторон -> Huber-прямые -> новые углы
+        lines = []
+        for i in range(4):
+            a, b = quad[i], quad[(i + 1) % 4]; ab = b - a; L = float(np.linalg.norm(ab))
+            u = ab / L; nrm = np.array([-u[1], u[0]], np.float32); rel = pts - a; t = rel @ u; dist = np.abs(rel @ nrm)
+            sel = pts[(dist < (0.05 - 0.012 * it) * diag) & (t > 0.18 * L) & (t < 0.82 * L)]      # середина стороны: углы скруглены
+            if len(sel) < 12: lines = None; break
+            lines.append(cv2.fitLine(sel, cv2.DIST_HUBER, 0, 0.01, 0.01).ravel())
+        if lines is None: break
+        new = []
+        for i in range(4):
+            p_ = _line_intersect(lines[i - 1], lines[i])
+            if p_ is None: new = None; break
+            new.append(p_)
+        if new is None: break
+        new = order_corners(np.float32(new))
+        if np.max(np.linalg.norm(new - quad, axis=1)) > 0.12 * diag: break
+        quad = new
+    refined = False
+    try: quad, refined = (refine_quad_edges(roi.astype(np.uint8), quad) if os.environ.get("DOCREC_QUAD_EDGE_REFINE", "0") == "1" else (quad, False))      # по умолчанию выкл.: на теневых сторонах не помогает, а сдвиг ~1° ломает таблицу оборота ВУ
+    except Exception: refined = False
+    quad = quad + np.float32([x0, y0])
+    qa = float(cv2.contourArea(quad)); fill = min(area, qa) / max(area, qa, 1.0)
+    return quad.astype(np.float32), {"ratio": round(ratio, 4), "fill": round(fill, 3), "aspect": round(_quad_aspect(quad), 3), "thr": round(thr, 1), "edge_refined": bool(refined), "bbox": [int(x), int(y), int(bw), int(bh)]}
+
+
 def small_card_crop(img: np.ndarray, max_ratio: float = 0.2, long_side: int = 1100):
     """Маленькая карточка посреди большого светлого листа (скан А4): находим единственный тёмный блок карточной формы, вырезаем с полями и увеличиваем
     (Lanczos + резкость) до long_side по длинной стороне. -> (crop, meta) | None."""
@@ -216,6 +323,9 @@ def small_card_crop(img: np.ndarray, max_ratio: float = 0.2, long_side: int = 11
     ratio = bw * bh / float(w * h); asp = max(bw, bh) / max(1, min(bw, bh))
     if ratio > max_ratio or ratio < 0.003 or not (1.2 <= asp <= 2.3): return None
     # точная рамка карточки: светлый корпус карточки чуть темнее листа — порог мягче, берём компонент, пересекающийся с найденным блоком
+    pq = None
+    try: pq = paper_card_quad(img, (x, y, bw, bh))
+    except Exception: pq = None
     soft = (g.astype(np.float32) < bg - 7).astype(np.uint8)
     soft = cv2.morphologyEx(soft, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)); soft = cv2.morphologyEx(soft, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
     nn, lab2, st2, _ = cv2.connectedComponentsWithStats(soft)
@@ -226,13 +336,18 @@ def small_card_crop(img: np.ndarray, max_ratio: float = 0.2, long_side: int = 11
         hull = cv2.convexHull(pts); ap = cv2.approxPolyDP(hull, 0.03 * cv2.arcLength(hull, True), True)
         quad = ap[:, 0, :] if len(ap) == 4 else cv2.boxPoints(cv2.minAreaRect(hull))
     if quad is None: quad = np.float32([[x, y], [x + bw, y], [x + bw, y + bh], [x, y + bh]])
+    quad_method = "blob"
+    if pq is not None and pq[1]["fill"] >= 0.9 and 1.3 <= pq[1]["aspect"] <= 1.9: quad, quad_method = pq[0], "paper_lines"      # 4 прямые по контуру карточки (перспектива/поворот)
     quad = np.float32(quad)
     pw, ph = int(0.08 * bw), int(0.08 * bh)
     x0, y0, x1, y1 = max(0, x - pw), max(0, y - ph), min(w, x + bw + pw), min(h, y + bh + ph)
     crop = img[y0:y1, x0:x1]; s = min(4.0, long_side / max(crop.shape[:2]))
+    if quad_method == "paper_lines":      # карточка в итоге должна быть ~1000 px по длинной стороне (ниже порога 1170 px, после которого тип СТС/паспорт переключается на «hi»-размер; выше OCR мелкого шрифта хуже)
+        Lq = float(max(np.linalg.norm(quad[0] - quad[1]), np.linalg.norm(quad[0] - quad[3])))
+        s = min(4.0, max(s, float(os.environ.get("DOCREC_CARD_LONG", "1000")) / max(Lq, 1.0)))
     quad = (quad - np.float32([x0, y0])) * s
     if s > 1.05:
         crop = cv2.resize(crop, None, fx=s, fy=s, interpolation=cv2.INTER_LANCZOS4)
         crop = cv2.addWeighted(crop, 1.5, cv2.GaussianBlur(crop, (0, 0), 1.8), -0.5, 0)
     else: s = 1.0
-    return crop, {"quad": quad.tolist(), "bbox_src": [x0, y0, x1, y1], "scale": round(float(s), 2), "area_ratio": round(ratio, 4), "note": "маленькая карточка на большом листе: вырезана и увеличена (Lanczos + резкость) перед OCR"}
+    return crop, {"quad": quad.tolist(), "bbox_src": [x0, y0, x1, y1], "scale": round(float(s), 2), "area_ratio": round(ratio, 4), "quad_method": quad_method, "note": "маленькая карточка на большом листе: вырезана и увеличена (Lanczos + резкость) перед OCR"}
